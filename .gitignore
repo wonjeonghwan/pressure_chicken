@@ -1,0 +1,21 @@
+.venv/
+runs/
+models/*.pt
+# 데이터셋 이미지 (대용량 바이너리, Roboflow에서 재다운로드 가능)
+dataset/**/images/
+# 구 경로 호환
+dataset/images/
+dataset/labels/
+# 영상 파일
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.m4v
+__pycache__/
+*.pyc
+.DS_Store
+config/store_*.json
+# Claude 세션 파일
+.claude/
