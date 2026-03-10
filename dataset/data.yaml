@@ -1,0 +1,13 @@
+train: train_aug/images
+val: valid_aug/images
+test: ../test/images
+
+nc: 3
+names: ['empty_burner', 'pot_body', 'pot_weight']
+
+roboflow:
+  workspace: personal-ebvkg
+  project: pressure_chicken
+  version: 4
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/personal-ebvkg/pressure_chicken/dataset/4

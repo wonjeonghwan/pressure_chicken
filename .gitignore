@@ -19,3 +19,19 @@ __pycache__/
 config/store_*.json
 # Claude 세션 파일
 .claude/
+
+# 실험/임시 스크립트
+debug_*.py
+check_*.py
+analyze_video.py
+test_*.py
+
+# 데이터 증강 아웃풋 폴더
+dataset/*_aug/
+
+# 디버깅용 덤프 이미지/폴더
+debug_*/
+frame_*.jpg
+
+# 모든 경로 모델 가중치 파일
+*.pt

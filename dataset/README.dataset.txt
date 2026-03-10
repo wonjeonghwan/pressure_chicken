@@ -1,4 +1,4 @@
-# pressure_chicken > 2026-03-06 4:18pm
+# pressure_chicken > Basic
 https://universe.roboflow.com/personal-ebvkg/pressure_chicken
 
 Provided by a Roboflow user

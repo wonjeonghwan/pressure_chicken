@@ -2,3 +2,10 @@ ultralytics>=8.0.0
 opencv-python>=4.8.0
 pygame>=2.5.0
 numpy>=1.24.0
+
+# PyTorch CUDA 12.x (RTX 3060 Ti 기준, 드라이버 577+)
+# uv 사용 시: pyproject.toml의 [tool.uv.sources] 설정으로 자동 적용 (uv sync)
+# pip 사용 시: 아래 명령으로 별도 설치 필요
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+torch>=2.0.0
+torchvision>=0.15.0

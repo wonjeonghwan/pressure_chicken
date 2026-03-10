@@ -1,6 +1,6 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-03-06 | 현재 단계: Phase 1-2 (auto_label.py)
+> 최종 업데이트: 2026-03-10 (3차) | 현재 단계: Phase 2 진동 감지 로직 튜닝 및 검증 진행 중
 
 ---
 
@@ -42,7 +42,6 @@ uv run python extract_frames.py --video 주방영상.mp4 --fps 2
 2. New Project → Object Detection
 3. `dataset/images/train/` 에서 **50장** 업로드
 4. **Auto Label** 기능 사용 (Grounding DINO 기반)
-   - 프롬프트 예시: `"pressure cooker"`, `"pot weight"`, `"burner"`
 5. 자동 결과 검토 → 틀린 것 수정
 6. 클래스 3개 확인:
    - `0: empty_burner` — 빈 화구
@@ -64,7 +63,7 @@ uv run python train.py
 uv run python auto_label.py --input dataset/images/train/ --model models/pot_detector.pt
 ```
 
-> `auto_label.py` — Step 1-3 에서 구현 예정
+> `auto_label.py` — Phase 1 에서 구현 예정
 
 자동 라벨링 결과를 Roboflow에 업로드 → 검토 후 최종 라벨 확정
 
@@ -84,7 +83,7 @@ uv run python train.py
 
 ### Step 1-1. 상태머신 확장
 
-`core/state_machine.py` — 상태 6개로 확장
+`core/state_machine.py` — 상태 6개로 확장 완료
 
 | 상태 | 설명 | UI 색상 |
 |------|------|---------|
@@ -95,130 +94,58 @@ uv run python train.py
 | `POT_STEAMING_SECOND` | 재벌 5분 진행 중 | 진한 초록 |
 | `DONE_SECOND` | 재벌 완료, 경보 | 빨간색 점멸 |
 
-전환 규칙:
-```
-EMPTY → POT_IDLE          : pot_body 감지
-POT_IDLE → STEAMING_FIRST : 딸랑이 진동 확정
-STEAMING_FIRST → DONE_FIRST : 12분 완료
-DONE_FIRST → STEAMING_SECOND : 딸랑이 재감지
-STEAMING_SECOND → DONE_SECOND : 5분 완료
+### Step 1-8. 진동 감지 로직 고도화 (2026-03-09)
+- 하이브리드 방식 도입: YOLO(위치고정) + Pixel Diff(상세모션)
+- EMA(지수이동평균) 적용으로 YOLO 박스 Jitter 제거
+- 템플릿 매칭(`matchTemplate`)으로 증기/가림 현상과 실제 진동 구분
+- `test_motion.py`를 통한 특정 구간(Stationary vs Moving) 검증 환경 구축
 
-어느 상태 + pot 이탈 → EMPTY
-STEAMING 중 → 자동 전환 없음 (잠금)
-```
-
-config 파라미터:
-```json
-"burners": [
-  {
-    "id": 1,
-    "countdown_first":  720,
-    "countdown_second": 300
-  }
-]
-```
-
-### Step 1-2. auto_label.py 구현
-
+### Step 1-9. `auto_label.py` 구현 (예정)
 YOLO 모델로 이미지를 추론하여 YOLO 형식 라벨 파일 자동 생성.
-사람이 검토 후 틀린 것만 수정하는 워크플로우 지원.
 
-### Step 1-3. UI 업데이트
-
-- 카드에 초벌/재벌 상태 구분 표시
-- DONE_FIRST 상태에서 재벌 대기 안내 메시지
-- 수동 조작: 초벌 시작 / 재벌 시작 / 초기화 버튼
-
-### Step 1-4. config 유효성 검사
-
+### Step 1-10. config 유효성 검사 (예정)
 실행 시 config 오류를 사람이 읽기 쉬운 메시지로 출력.
 
 ---
 
-## Phase 2 — 테스트 (카메라 1대)
+## Phase 2 — 테스트 (카메라 1대 / 녹화 영상)
 
-### 환경
-- 카메라 1대, 화구 5~10개
-- 실제 압력밥솥 + 딸랑이
+**현재 상태**: 시스템 실행 및 멀티 화구 감지 가능. 하이브리드 모드 적용 후 오탐율 대폭 감소.
+**진행 중**: 실제 현장 영상(`DJI_20260304141645_0001_D.MP4`)의 STATIONARY/MOVING 구간 정밀 튜닝 중.
 
 ### 체크리스트
-
-**감지 정확도**
-- [ ] 빈 화구에서 EMPTY 유지
-- [ ] 밥솥 올리면 POT_IDLE 전환
-- [ ] 밥솥 내리면 EMPTY 복귀
-- [ ] 딸랑이 2~3초 이상 → 초벌 12분 자동 시작
-- [ ] 연기/증기 발생 시에도 오탐 없음
-- [ ] 사람이 지나가며 가려도 타이머 유지
-
-**사이클 전환**
-- [ ] 12분 완료 → DONE_FIRST 전환
-- [ ] DONE_FIRST 상태에서 딸랑이 재감지 → 5분 자동 시작
-- [ ] 5분 완료 → DONE_SECOND 경보
-- [ ] 밥솥 이탈 → EMPTY 리셋
-
-**타이머 잠금**
-- [ ] STEAMING 중 카메라 가림 후 딸랑이 재보여도 타이머 이중 시작 없음
-- [ ] STEAMING 중 자동 상태 변경 없음
-
-**수동 조작**
-- [ ] 초벌 강제 시작
-- [ ] 재벌 강제 시작
-- [ ] 수동 초기화
-- [ ] 화구 선택 (클릭 / 숫자키)
-
-**다중 화구**
-- [ ] 5개 화구 동시 실행 시 간섭 없음
-- [ ] 각 화구 독립적으로 상태 유지
+- [x] ROI 재캘리브레이션 (전체 화구 완료)
+- [/] 감지 정확도 튜닝 (HybridVibrationTracker 파라미터 최적화)
+- [ ] 딸랑이 진동 → STEAMING 자동 전환 확인
+- [ ] 사이클 전환 체크리스트 (초벌 -> 대기 -> 재벌)
+- [ ] 타이머 잠금 체크리스트 (사람 가림, 연기 발생 시 유지)
+- [ ] 수동 조작 체크리스트 (시작/초기화 버튼)
 
 ---
 
 ## Phase 3 — 확장 (카메라 2대)
 
-### 체크리스트
-- [ ] `config/store_config.json` 에 source 추가만으로 동작
-- [ ] 두 카메라 화구가 독립적으로 동작
-- [ ] 한 카메라 연결 끊겨도 나머지 정상 동작
-- [ ] 화구 20개 동시 실행 성능 (30fps 유지)
+- [ ] 2대 동작 확인 (config 설정 완료)
+- [ ] 20개 화구 동시 실행 성능 (30fps 유지 목표)
 
 ---
 
-## 미결 / 이후 고려사항
+## 주요 설계 변경 이력
 
-| 항목 | 내용 |
-|------|------|
-| 알람 | DONE_SECOND 시 소리 알람 추가 여부 |
-| 로그 | 화구별 타이머 이력 저장 여부 |
-| 원격 모니터링 | 다른 화면(태블릿 등)에서 확인 여부 |
-| 새 매장 추가 | 카메라 배치가 다른 매장마다 재학습 필요 여부 |
+| 날짜 | 파일 | 변경 내용 |
+|------|------|----------|
+| 2026-03-06 | core/state_machine.py | 4상태 → 6상태 (STEAMING_FIRST/SECOND, DONE_FIRST/SECOND) |
+| 2026-03-06 | calibration.py | 화구 수 고정 → 드래그 기반 동적 지정 방식으로 재작성 |
+| 2026-03-07 | core/frame_processor.py | read_frames() / detect_and_update() 분리; 배치 YOLO 추론 |
+| 2026-03-07 | main.py | 15fps 영상읽기 / 3fps YOLO 분리; FPS 카운터 추가 |
+| 2026-03-09 | core/frame_processor.py | `HybridVibrationTracker` 도입: EMA 보정, 템플릿 매칭 기반 진동 판별 |
+| 2026-03-09 | test_motion.py | 구간별(Stationary/Moving) 정밀 분석용 스크립트 추가 |
+| 2026-03-10 | ACTION_PLAN.md | 현재 상태 업데이트 및 Phase 1-8 추가 |
 
 ---
 
-## 현재 진행 위치
+## 현재 진행 위치 상세 (Phase 0/1 완료 내역)
 
-### Phase 0 — 데이터 준비
-
-- [x] Phase 0-1 : 영상 확보 (주방 녹화 영상)
-- [ ] Phase 0-2 : Roboflow 자동 라벨링 50장
-- [ ] Phase 0-3 : 1차 학습 (부트스트랩 모델)
-- [ ] Phase 0-4 : 나머지 프레임 자동 라벨링 + 검토
-- [ ] Phase 0-5 : 최종 학습 (mAP@0.5 > 0.85 목표)
-
-### Phase 1 — 코드 업데이트
-
-- [x] Phase 1-1 : 상태머신 6상태 확장 (초벌/재벌 분리) — 2026-03-06 완료
-- [ ] Phase 1-2 : `auto_label.py` 구현 (YOLO 추론 → YOLO 라벨 자동 생성)
-- [ ] Phase 1-3 : UI 업데이트 (초벌/재벌 구분 표시, 재벌 대기 안내)
-- [ ] Phase 1-4 : config 유효성 검사
-
-### Phase 2 — 테스트 (카메라 1대)
-
-- [ ] 감지 정확도 체크리스트 (GUIDE.md Phase 2 참고)
-- [ ] 사이클 전환 체크리스트
-- [ ] 타이머 잠금 체크리스트
-- [ ] 수동 조작 체크리스트
-
-### Phase 3 — 확장 (카메라 2대)
-
-- [ ] 2대 동작 확인
-- [ ] 20개 화구 동시 성능 (30fps 유지)
+- [x] Phase 0-4b : 재학습 완료 — mAP@0.5=95.3% (2026-03-07)
+- [x] Phase 1-1 ~ 1-7 : 코드 기본틀 및 성능 최적화, UI 반영 완료 (2026-03-07)
+- [x] Phase 1-8 : 하이브리드 진동 감지 로직 적용 및 검증용 스크립트 작성 완료 (2026-03-09)

@@ -51,6 +51,18 @@ class VideoSource:
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self._cap.read()
 
+        # 다운스케일: FHD(1920×1080) 초과 시 자동으로 FHD로 축소
+        # config에 "resize": [w, h] 지정 시 해당 크기로 강제 조정
+        if ret and frame is not None:
+            explicit = self._cfg.get("resize")
+            if explicit:
+                frame = cv2.resize(frame, tuple(explicit), interpolation=cv2.INTER_AREA)
+            elif frame.shape[1] > 1920 or frame.shape[0] > 1080:
+                scale = min(1920 / frame.shape[1], 1080 / frame.shape[0])
+                new_w = int(frame.shape[1] * scale)
+                new_h = int(frame.shape[0] * scale)
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         return ret, frame
 
     def release(self) -> None:

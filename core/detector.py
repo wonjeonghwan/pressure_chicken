@@ -95,19 +95,31 @@ class BurnerDetector:
         """
         if BurnerDetector._model_missing or frame is None or frame.size == 0:
             return []
+        return self.detect_batch([frame])[0]
 
-        results = BurnerDetector._model(
-            frame,
-            conf=self._confidence,
-            verbose=False,
-        )
-        out: list[Detection] = []
-        for r in results:
+    def detect_batch(self, frames: list[np.ndarray]) -> list[list[Detection]]:
+        """
+        복수 ROI 크롭을 한 번의 YOLO 호출로 처리 (배치 추론).
+        화구 N개를 개별 N회 대신 1회로 처리해 추론 비용 대폭 절감.
+        Returns: frames 순서에 대응하는 Detection 리스트의 리스트.
+        """
+        if BurnerDetector._model_missing or not frames:
+            return [[] for _ in frames]
+
+        valid_idx = [i for i, f in enumerate(frames) if f is not None and f.size > 0]
+        if not valid_idx:
+            return [[] for _ in frames]
+
+        valid_frames = [frames[i] for i in valid_idx]
+        results = BurnerDetector._model(valid_frames, conf=self._confidence, half=True, verbose=False)
+
+        out: list[list[Detection]] = [[] for _ in frames]
+        for i, r in zip(valid_idx, results):
             for box in r.boxes:
                 cls_id = int(box.cls[0])
                 conf   = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                out.append(Detection(cls_id, conf, x1, y1, x2, y2))
+                out[i].append(Detection(cls_id, conf, x1, y1, x2, y2))
         return out
 
     def detect_opencv(self, roi_frame: np.ndarray) -> tuple[bool, bool]:

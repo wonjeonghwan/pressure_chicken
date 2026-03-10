@@ -33,6 +33,7 @@ _PAD          = 6
 _BTN_H        = 28
 _TITLE_H      = 36
 _WARNING_H    = 28
+_STATUS_BAR_H = 44   # 상태바 높이 (2줄: 단축키 안내 + 상태 선례)
 _RESET_HOLD_S = 1.0   # 초기화 버튼 길게 누르기 필요 시간 (초)
 
 # 색상
@@ -83,8 +84,9 @@ class UIDisplay:
     def init(self) -> None:
         pygame.init()
         w, h  = self._cfg.get("window_size", [1280, 720])
-        title = self._cfg.get("window_title", "압력밥솥 타이머")
-        self._screen = pygame.display.set_mode((w, h))
+        title = self._cfg.get("window_title", "압력밥솔 타이머")
+        # RESIZABLE 플래그 추가 → 마우스로 창 크기 조절 가능
+        self._screen = pygame.display.set_mode((w, h), pygame.RESIZABLE)
         pygame.display.set_caption(title)
         self._clock  = pygame.time.Clock()
         self._fonts  = _load_fonts()
@@ -98,6 +100,12 @@ class UIDisplay:
         """True 반환 → 종료 요청"""
         if event.type == pygame.QUIT:
             return True
+
+        # 상태 포개증 - 유동 스크린 업데이트
+        if event.type == pygame.VIDEORESIZE:
+            w, h = event.w, event.h
+            self._screen = pygame.display.set_mode((w, h), pygame.RESIZABLE)
+            return False
 
         if event.type == pygame.KEYDOWN:
             return self._on_keydown(event.key)
@@ -232,7 +240,8 @@ class UIDisplay:
         )
         rows   = max_row + 1
         cell_w = sw // cols
-        cell_h = max(90, (sh - offset_y) // rows)
+        # 상태바 높이를 빼서 카드가 버튼을 덮지 않도록 함
+        cell_h = max(90, (sh - offset_y - _STATUS_BAR_H) // rows)
 
         self._card_rects.clear()
         self._reset_rects.clear()
@@ -266,6 +275,12 @@ class UIDisplay:
         id_surf = self._fonts["id"].render(str(bid), True, (255, 255, 255))
         self._screen.blit(id_surf, id_surf.get_rect(centerx=cx, top=y + _PAD + 2))
 
+        # 초벌/재벌 단계 레이블 (타이머 위 소형 텍스트)
+        phase = bsm.phase_label
+        if phase:
+            ph_surf = self._fonts["small"].render(phase, True, (220, 220, 180))
+            self._screen.blit(ph_surf, ph_surf.get_rect(centerx=cx, top=y + _PAD + 32))
+
         # 타이머 / 상태 레이블
         label = bsm.status_label
         font  = self._fonts["timer"] if bsm.state in _STEAMING else self._fonts["label"]
@@ -273,7 +288,42 @@ class UIDisplay:
         mid_y    = y + h // 2 - _BTN_H // 2 - _PAD
         self._screen.blit(lbl_surf, lbl_surf.get_rect(centerx=cx, centery=mid_y))
 
-        # 하단 버튼 행
+        # 딸랑이 감지 인디케이터 (타이머 아래)
+        # POT_IDLE / DONE_FIRST 상태에서만 표시 (진동 감지 준비 중일 때)
+        if bsm.state in (BurnerState.POT_IDLE, BurnerState.DONE_FIRST):
+            bar_w  = w - _PAD * 4
+            bar_h  = 6
+            bar_x  = x + _PAD * 2
+            bar_y  = mid_y + lbl_surf.get_height() // 2 + _PAD + 14
+            # 딸랑이 감지 바 레이블
+            lbl = self._fonts["small"].render("딸랑이 감지", True, (160, 160, 160))
+            self._screen.blit(lbl, (bar_x, bar_y - 14))
+            # 배경
+            pygame.draw.rect(self._screen, (60, 60, 60),
+                             pygame.Rect(bar_x, bar_y, bar_w, bar_h), border_radius=3)
+            # 진행도
+            fill_w = int(bar_w * min(1.0, bsm.vibration_score))
+            if fill_w > 0:
+                bar_color = (255, 220, 60) if bsm.vibration_score < 1.0 else (80, 255, 80)
+                pygame.draw.rect(self._screen, bar_color,
+                                 pygame.Rect(bar_x, bar_y, fill_w, bar_h), border_radius=3)
+            # 딸랑이 감지 점 (오른쪽 위)
+            dot_color = (255, 220, 60) if bsm.weight_detected else (80, 80, 80)
+            pygame.draw.circle(self._screen, dot_color, (x + w - _PAD * 2, y + _PAD + 10), 5)
+
+        # 하단 버튼 행 — 상태에 따라 레이블 변경
+        from core.state_machine import BurnerState as BS
+        if bsm.state in (BS.EMPTY, BS.POT_IDLE):
+            start_label = "▶ 단추"
+        elif bsm.state == BS.POT_STEAMING_FIRST:
+            start_label = "⏩ 완료"
+        elif bsm.state in (BS.DONE_FIRST,):
+            start_label = "⏭ 재벌"
+        elif bsm.state == BS.POT_STEAMING_SECOND:
+            start_label = "⏩ 완료"
+        else:
+            start_label = "시작"
+
         btn_y    = y + h - _BTN_H - _PAD
         btn_w    = (w - _PAD * 3) // 2
 
@@ -287,8 +337,8 @@ class UIDisplay:
         if bid in self._reset_hold:
             elapsed   = time.monotonic() - self._reset_hold[bid]
             hold_prog = min(1.0, elapsed / _RESET_HOLD_S)
-        self._draw_button(reset_rect, "⟳", _C_BTN_RESET, hold_prog)
-        self._draw_button(start_rect, "▶", _C_BTN_START)
+        self._draw_button(reset_rect, "초기화", _C_BTN_RESET, hold_prog)
+        self._draw_button(start_rect, start_label, _C_BTN_START)
 
     def _draw_button(
         self,
@@ -307,24 +357,33 @@ class UIDisplay:
         self._screen.blit(surf, surf.get_rect(center=rect.center))
 
     def _draw_status_bar(self) -> None:
-        """하단 상태바: 선택된 화구 표시"""
+        """2줄 상태바: 위쥐 = 단축키/조작 안내, 아래줄 = 상태 선례"""
         sw, sh = self._screen.get_size()
-        bar_h  = 22
-        bar    = pygame.Rect(0, sh - bar_h, sw, bar_h)
+        bar    = pygame.Rect(0, sh - _STATUS_BAR_H, sw, _STATUS_BAR_H)
         pygame.draw.rect(self._screen, (30, 30, 30), bar)
+        # 구분선
+        pygame.draw.line(self._screen, (60, 60, 60),
+                         (0, sh - _STATUS_BAR_H + 22),
+                         (sw, sh - _STATUS_BAR_H + 22))
 
+        # 위쥐: 선택 / 조작 안내
         if self._selected_id is not None:
             try:
                 self._registry.get(self._selected_id)
             except KeyError:
                 self._selected_id = None
         if self._selected_id is not None:
-            msg = f"[{self._selected_id}번 화구 선택됨]  R: 초기화   S: 수동시작   ESC: 선택해제"
+            row1 = f"[{self._selected_id}번 화구]  R: 초기화   S: 수동시작/다음단계   ESC: 선택해제"
         else:
-            msg = "카드 클릭 또는 숫자키(1~0)로 화구 선택  |  ESC: 종료"
+            row1 = "카드 클릭 또는 숫자키(1~0)로 화구 선택  |  ESC: 종료"
 
-        surf = self._fonts["small"].render(msg, True, (180, 180, 180))
-        self._screen.blit(surf, (8, sh - bar_h + 3))
+        # 아래줄: 상태 선례
+        row2 = "■파랑=준비  ■연두=초벌진행  ■노랑=초벌완료/재벌대기  ■진녹=재벌진행  ■빨강=완료 │ 버튼: [초기화] 길게누름(잠금) / [▶단추] 다음단계"
+
+        surf1 = self._fonts["small"].render(row1, True, (200, 200, 200))
+        surf2 = self._fonts["small"].render(row2, True, (150, 150, 150))
+        self._screen.blit(surf1, (8, sh - _STATUS_BAR_H + 3))
+        self._screen.blit(surf2, (8, sh - _STATUS_BAR_H + 25))
 
 
 # ── 폰트 로드 ────────────────────────────────────────────────────────────────

@@ -22,6 +22,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     except Exception:
         pass
 
+import cv2
+import numpy as np
 import pygame
 
 from sources.video_source import VideoSource
@@ -31,6 +33,87 @@ from core.frame_processor import FrameProcessor
 from ui.ui_display import UIDisplay
 
 DEFAULT_CONFIG = "config/store_config.json"
+
+# 미리보기 창 축소 비율 (1.0 = 원본, 0.4 = 40%)
+_PREVIEW_SCALE = 1.0
+
+
+def draw_preview(
+    frames: dict,
+    burners_cfg: list[dict],
+    registry: BurnerRegistry,
+    processor: FrameProcessor | None = None,
+) -> None:
+    """소스별 영상에 ROI 박스 + 화구번호 + 상태 오버레이 후 cv2 창에 표시."""
+    src_burners: dict[int, list[dict]] = {}
+    for b in burners_cfg:
+        src_burners.setdefault(b["source_id"], []).append(b)
+
+    for src_id, frame in frames.items():
+        if frame is None:
+            continue
+        vis = frame.copy()
+        for b in src_burners.get(src_id, []):
+            roi = b.get("roi")
+            if not roi:
+                continue
+
+            # 1. 고정 ROI (캘리브레이션 영역 - 옅은 회색)
+            x, y, w, h = roi
+            cv2.rectangle(vis, (x, y), (x + w, y + h), (100, 100, 100), 1)
+
+            # 2. 실시간 YOLO 매칭 결과 (바디 & 딸랑이)
+            if processor:
+                # 바디 박스 (상태별 색상)
+                bsm = registry.get(b["id"])
+                if bsm:
+                    r, g, b_val = bsm.color
+                    color_bgr = (b_val, g, r) # RGB to BGR
+                    
+                    if b["id"] in processor.last_matched_boxes:
+                        bx1, by1, bx2, by2 = processor.last_matched_boxes[b["id"]]
+                        cv2.rectangle(vis, (bx1, by1), (bx2, by2), color_bgr, 2)
+                        cv2.putText(vis, f"Pot {b['id']}", (bx1, by1 - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
+
+                # 딸랑이 박스 (노란색)
+                if b["id"] in processor.last_weight_boxes:
+                    wx1, wy1, wx2, wy2 = processor.last_weight_boxes[b["id"]]
+                    cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (0, 255, 255), 2)
+                    cv2.putText(vis, f"Whistle {b['id']}", (wx1, wy1 - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        # _PREVIEW_SCALE 적용
+        h_img, w_img = vis.shape[:2]
+        vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
+        window_name = f"Camera {src_id}"
+        
+        # _PREVIEW_SCALE 적용
+        h_img, w_img = vis.shape[:2]
+        vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
+        window_name = f"Camera {src_id}"
+        
+        # 1. 창이 없으면 먼저 만듦
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            
+        cv2.imshow(window_name, vis)
+        
+        # 2. 강제 윈도우 스냅 크기 조절 (운영체제 창 테두리)
+        rect = cv2.getWindowImageRect(window_name)
+        if rect is not None and rect[2] > 0 and rect[3] > 0:
+            win_w, win_h = rect[2], rect[3]
+            src_h, src_w = vis.shape[:2]
+            
+            current_ratio = win_w / win_h
+            target_ratio = src_w / src_h
+            
+            # 사용자가 창 비율을 왜곡했을 경우 (5% 오차 허용) 강제로 세로축을 가로축에 맞춰 교정
+            if abs(current_ratio - target_ratio) > 0.05:
+                target_h = int(win_w / target_ratio)
+                cv2.resizeWindow(window_name, win_w, target_h)
+
+    cv2.waitKey(1)
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -96,26 +179,64 @@ def run(config: dict, test_frames: int = 0) -> None:
     if detector.model_missing:
         print("[main] 테스트 모드: 자동 감지 비활성화. ▶ 버튼으로 수동 시작 가능.")
 
+    import time as _time
+    _last_frame      = 0.0
+    _last_detect     = 0.0
+    _FRAME_INTERVAL  = 1 / 15   # 영상 디코딩/표시 최대 15fps (4K 부하 절감)
+    _DETECT_INTERVAL = 1 / 15   # YOLO 감지 초당 15회 (영상읽기와 동일)
+
+    # FPS 측정
+    _fps_video_count  = 0
+    _fps_detect_count = 0
+    _fps_report_at    = _time.monotonic() + 5.0   # 5초마다 출력
+
+    current_frames: dict = {}
     frame_count = 0
     running     = True
-    while running:
-        for event in pygame.event.get():
-            if display.handle_event(event):
+    try:
+        while running:
+            for event in pygame.event.get():
+                if display.handle_event(event):
+                    running = False
+
+            now = _time.monotonic()
+
+            # 영상 읽기 + 미리보기: 15fps
+            if now - _last_frame >= _FRAME_INTERVAL:
+                current_frames = processor.read_frames()
+                draw_preview(current_frames, burners_cfg, registry, processor)
+                _last_frame = now
+                _fps_video_count += 1
+
+            # YOLO 감지: 초당 3회 (배치 추론으로 화구 수 무관 1회 호출)
+            if now - _last_detect >= _DETECT_INTERVAL:
+                processor.detect_and_update()
+                _last_detect = now
+                _fps_detect_count += 1
+
+            display.render()
+
+            # FPS 출력 (5초마다)
+            if now >= _fps_report_at:
+                print(f"[FPS] 영상읽기 {_fps_video_count/5:.1f}/s  |  YOLO감지 {_fps_detect_count/5:.1f}/s")
+                _fps_video_count  = 0
+                _fps_detect_count = 0
+                _fps_report_at    = now + 5.0
+
+            frame_count += 1
+            if test_frames > 0 and frame_count >= test_frames:
+                print(f"[main] 테스트 {test_frames}프레임 완료. 정상 종료.")
                 running = False
 
-        processor.step()
-        display.render()
-
-        frame_count += 1
-        if test_frames > 0 and frame_count >= test_frames:
-            print(f"[main] 테스트 {test_frames}프레임 완료. 정상 종료.")
-            running = False
-
-    display.quit()
-    for vs in sources.values():
-        vs.release()
-
-    print("[main] 종료.")
+    except KeyboardInterrupt:
+        print("[main] Ctrl+C 감지. 종료 중...")
+    finally:
+        # 창 종료 / 예외 / Ctrl+C 모든 경우에 반드시 정리
+        display.quit()
+        cv2.destroyAllWindows()
+        for vs in sources.values():
+            vs.release()
+        print("[main] 종료.")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -130,11 +251,6 @@ def main() -> None:
                         help="N 프레임 처리 후 자동 종료 (0=무한)")
     args = parser.parse_args()
 
-    if args.calibrate:
-        from calibration import run_calibration
-        run_calibration(args.config)
-        return
-
     config = load_config(args.config)
 
     overrides: dict[int, str] = {}
@@ -144,6 +260,11 @@ def main() -> None:
         overrides[1] = args.source_1
     if overrides:
         apply_source_overrides(config, overrides)
+
+    if args.calibrate:
+        from calibration import run_calibration
+        run_calibration(args.config, config)
+        return
 
     run(config, test_frames=args.test)
 

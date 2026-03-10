@@ -1,8 +1,8 @@
 
-pressure_chicken - v2 2026-03-06 4:18pm
+pressure_chicken - v4 Basic
 ==============================
 
-This dataset was exported via roboflow.com on March 6, 2026 at 7:19 AM GMT
+This dataset was exported via roboflow.com on March 10, 2026 at 8:45 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,7 +17,7 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 82 images.
+The dataset includes 104 images.
 Pot-burner are annotated in YOLOv8 format.
 
 The following pre-processing was applied to each image:
@@ -25,6 +25,5 @@ The following pre-processing was applied to each image:
 * Resize to 640x640 (Fit within)
 
 The following augmentation was applied to create 3 versions of each source image:
-* Equal probability of one of the following 90-degree rotations: none, clockwise, counter-clockwise, upside-down
 
 

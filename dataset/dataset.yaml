@@ -1,9 +1,0 @@
-path: ./dataset
-train: images/train
-val:   images/val
-
-nc: 3
-names:
-  0: empty_burner   # 빈 화구 (밥솥 없음)
-  1: pot_body       # 밥솥 몸체 (기준점)
-  2: pot_weight     # 딸랑이 (추)
