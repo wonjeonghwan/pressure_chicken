@@ -27,6 +27,7 @@ import numpy as np
 import pygame
 
 from sources.video_source import VideoSource
+from sources.camera_utils import save_config, switch_camera
 from core.state_machine import BurnerRegistry
 from core.detector import BurnerDetector
 from core.frame_processor import FrameProcessor
@@ -38,12 +39,15 @@ DEFAULT_CONFIG = "config/store_config.json"
 _PREVIEW_SCALE = 1.0
 
 
+_CV2_KEY_CAM = ord('c')  # 카메라 전환 키 (cv2 창 포커스 시)
+
+
 def draw_preview(
     frames: dict,
     burners_cfg: list[dict],
     registry: BurnerRegistry,
     processor: FrameProcessor | None = None,
-) -> None:
+) -> int:
     """소스별 영상에 ROI 박스 + 화구번호 + 상태 오버레이 후 cv2 창에 표시."""
     src_burners: dict[int, list[dict]] = {}
     for b in burners_cfg:
@@ -85,16 +89,17 @@ def draw_preview(
 
         # _PREVIEW_SCALE 적용
         h_img, w_img = vis.shape[:2]
-        vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
+        if _PREVIEW_SCALE != 1.0:
+            vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
+        
         window_name = f"Camera {src_id}"
         
-        # _PREVIEW_SCALE 적용
-        h_img, w_img = vis.shape[:2]
-        vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
-        window_name = f"Camera {src_id}"
-        
-        # 1. 창이 없으면 먼저 만듦
-        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+        # 1. 창이 없으면 먼저 만듦 (macOS Cocoa는 미존재 창에 getWindowProperty 호출 시 예외 발생)
+        try:
+            visible = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE)
+        except cv2.error:
+            visible = -1
+        if visible < 1:
             cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
             
         cv2.imshow(window_name, vis)
@@ -113,7 +118,7 @@ def draw_preview(
                 target_h = int(win_w / target_ratio)
                 cv2.resizeWindow(window_name, win_w, target_h)
 
-    cv2.waitKey(1)
+    return cv2.waitKeyEx(1)
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -128,11 +133,7 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
-def apply_source_overrides(config: dict, overrides: dict[int, str]) -> None:
-    for src in config["sources"]:
-        if src["id"] in overrides:
-            src["type"] = "file"
-            src["path"] = overrides[src["id"]]
+# Removed local save_config and _switch_camera as they are now in camera_utils.py
 
 
 # ── 메인 루프 ─────────────────────────────────────────────────────────────────
@@ -149,10 +150,28 @@ def run(config: dict, test_frames: int = 0) -> None:
 
     # 1) VideoSource
     sources: dict[int, VideoSource] = {}
+    cam_indices: dict[int, int] = {}   # source_id → 현재 카메라 인덱스
+    
+    config_path = config.get("_path") # pass _path if needed or use global
+
     for sc in sources_cfg:
         vs = VideoSource(sc)
         vs.open()
+        
+        # 카메라 오프닝 실패 시 사용 가능한 카메라 자동 탐색 (Fallback)
+        if vs.failed and sc.get("type", "camera") == "camera":
+            print(f"[main] 소스 {sc['id']} 로드 실패. 사용 가능한 다른 카메라를 찾습니다...")
+            available = VideoSource.find_available_cameras()
+            if available:
+                new_idx = available[0]
+                print(f"[main] -> 대체 카메라 발견 (index: {new_idx}). 연결을 시도합니다.")
+                sc["index"] = new_idx
+                vs = VideoSource(sc)
+                vs.open()
+                
         sources[sc["id"]] = vs
+        if sc.get("type", "camera") == "camera":
+            cam_indices[sc["id"]] = sc.get("index", 0)
 
     # 2) BurnerRegistry
     registry    = BurnerRegistry()
@@ -193,18 +212,45 @@ def run(config: dict, test_frames: int = 0) -> None:
     current_frames: dict = {}
     frame_count = 0
     running     = True
+    
+    # 카메라 전환 쿨다운 (중복 입력 방지)
+    _last_cam_switch = 0.0
+    _CAM_SWITCH_COOLDOWN = 0.5
+
     try:
         while running:
+            now = _time.monotonic()
+            
+            # 1) 공통 카메라 전환 함수
+            def trigger_camera_switch():
+                nonlocal _last_cam_switch
+                if now - _last_cam_switch < _CAM_SWITCH_COOLDOWN:
+                    return
+                _last_cam_switch = now
+                for src_id in list(cam_indices):
+                    cam_indices[src_id] = switch_camera(
+                        sources, src_id, cam_indices[src_id],
+                        config=config, config_path=config.get("_path")
+                    )
+
+            # 2) Pygame 이벤트 처리
             for event in pygame.event.get():
-                if display.handle_event(event):
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_c:
+                    trigger_camera_switch()
+                elif display.handle_event(event):
                     running = False
 
-            now = _time.monotonic()
-
-            # 영상 읽기 + 미리보기: 15fps
+            # 3) 영상 읽기 + 미리보기: 15fps
             if now - _last_frame >= _FRAME_INTERVAL:
                 current_frames = processor.read_frames()
-                draw_preview(current_frames, burners_cfg, registry, processor)
+                cv2_key = draw_preview(current_frames, burners_cfg, registry, processor)
+                
+                # OpenCV 키 입력 (대소문자 'c'/'C' 처리)
+                if cv2_key != -1:
+                    key_code = cv2_key & 0xFF
+                    if key_code == ord('c') or key_code == ord('C'):
+                        trigger_camera_switch()
+
                 _last_frame = now
                 _fps_video_count += 1
 
@@ -252,6 +298,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    config["_path"] = args.config  # 저장을 위한 경로 기록
 
     overrides: dict[int, str] = {}
     if args.source_0:

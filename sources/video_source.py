@@ -85,6 +85,17 @@ class VideoSource:
         h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         return (w, h)
 
+    @staticmethod
+    def find_available_cameras(max_try: int = 10) -> list[int]:
+        """사용 가능한 카메라 인덱스 목록을 반환."""
+        available = []
+        for i in range(max_try):
+            cap = cv2.VideoCapture(i)
+            if cap is not None and cap.isOpened():
+                available.append(i)
+                cap.release()
+        return available
+
     def __enter__(self):
         self.open()
         return self

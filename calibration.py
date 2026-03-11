@@ -17,6 +17,7 @@ import cv2
 import numpy as np
 
 from sources.video_source import VideoSource
+from sources.camera_utils import switch_camera
 
 
 # ── 마우스 콜백 상태 ────────────────────────────────────────────────────────
@@ -176,6 +177,26 @@ def run_calibration(config_path: str, config: dict | None = None) -> None:
         elif key == ord("r"):  # redo
             _drag_done = False
             print("  다시 그리기.")
+
+        elif key in (ord("c"), ord("C")):  # 카메라 전환
+            # 현재 source_id는 0으로 고정되어 있음 (calibration.py 구조상)
+            current_vs = sources.get(current_src)
+            if current_vs:
+                # VideoSource.get_index() 같은게 없으므로 config에서 가져와야 함
+                # 하지만 VideoSource 객체에 정보를 담아두지 않았으므로...
+                # 일단 config에서 현재 index를 찾습니다.
+                current_idx = 0
+                for sc in config.get("sources", []):
+                    if sc.get("id") == current_src:
+                        current_idx = sc.get("index", 0)
+                        break
+                
+                new_idx = switch_camera(
+                    sources, current_src, current_idx,
+                    config=config, config_path=config_path
+                )
+                vs = sources.get(current_src) # 갱신된 소스
+                print(f"  카메라 인덱스 변경됨: {current_idx} -> {new_idx}")
 
     cv2.destroyAllWindows()
     for s in sources.values():

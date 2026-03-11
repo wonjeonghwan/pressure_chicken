@@ -47,6 +47,7 @@ class BurnerDetector:
     _model        = None
     _model_missing: bool = True
     _initialized:  bool  = False
+    _use_half:     bool  = False  # FP16 사용 여부 (CUDA만 True)
 
     @classmethod
     def _init_model(cls, weights_path: str, confidence: float) -> None:
@@ -60,11 +61,14 @@ class BurnerDetector:
             return
 
         try:
+            import torch
             from ultralytics import YOLO  # type: ignore
             cls._model        = YOLO(weights_path)
             cls._confidence   = confidence
             cls._model_missing = False
-            print(f"[Detector] YOLO 모델 로드 완료: {weights_path}")
+            # FP16(half)은 CUDA에서만 안정적 — MPS/CPU는 False
+            cls._use_half = torch.cuda.is_available()
+            print(f"[Detector] YOLO 모델 로드 완료: {weights_path}  (half={cls._use_half})")
         except Exception as e:
             print(f"[Detector] 로드 실패 ({e}) → OpenCV 폴백 모드")
             cls._model_missing = True
@@ -111,7 +115,7 @@ class BurnerDetector:
             return [[] for _ in frames]
 
         valid_frames = [frames[i] for i in valid_idx]
-        results = BurnerDetector._model(valid_frames, conf=self._confidence, half=True, verbose=False)
+        results = BurnerDetector._model(valid_frames, conf=self._confidence, half=BurnerDetector._use_half, verbose=False)
 
         out: list[list[Detection]] = [[] for _ in frames]
         for i, r in zip(valid_idx, results):
