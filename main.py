@@ -133,6 +133,16 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
+def apply_source_overrides(config: dict, overrides: dict[int, str]) -> None:
+    """Override source config with CLI arguments (e.g., video files)"""
+    sources = config.get("sources", [])
+    for sc in sources:
+        sid = sc.get("id")
+        if sid in overrides:
+            sc["type"] = "file"
+            sc["path"] = overrides[sid]
+
+
 # Removed local save_config and _switch_camera as they are now in camera_utils.py
 
 

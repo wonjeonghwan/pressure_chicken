@@ -141,6 +141,7 @@ YOLO 모델로 이미지를 추론하여 YOLO 형식 라벨 파일 자동 생성
 | 2026-03-09 | core/frame_processor.py | `HybridVibrationTracker` 도입: EMA 보정, 템플릿 매칭 기반 진동 판별 |
 | 2026-03-09 | test_motion.py | 구간별(Stationary/Moving) 정밀 분석용 스크립트 추가 |
 | 2026-03-10 | ACTION_PLAN.md | 현재 상태 업데이트 및 Phase 1-8 추가 |
+| 2026-03-11 | main.py, config | Mac/Windows 호환성 버그 수정 (`apply_source_overrides` 복구 및 웹캠 기본화) |
 
 ---
 

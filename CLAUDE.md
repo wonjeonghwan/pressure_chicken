@@ -438,6 +438,18 @@ uv run python main.py --config config/store_001.json
 
 ---
 
+## 💻 OS 간 호환성 주의사항 (Mac vs Windows)
+
+1. **CLI 인자 덮어쓰기 (`--source-0` 등) 버그 기록 (2026-03-11)**
+   - **현상**: Mac에서 구성 유틸리티 분리/리팩토링 과정 중 `apply_source_overrides` 함수가 유실되어, Windows에서 `git pull` 이후 비디오 소스 인수를 인식하지 못하고 `NameError`가 발생함.
+   - **조치 사항**: `main.py`에 `apply_source_overrides` 함수를 원상복구하여 해결. 또한 `.json` 설정 파일은 환경끼리 충돌할 수 있으므로, 기본값을 항상 카메라(`"type": "camera", "index": 0`)로 세팅해 두고 테스트용/녹화영상은 CLI 인자로 덮어씌워 사용하는 것을 권장.
+
+2. **Windows 디폴트 웹캠 MSMF 에러 (`Error: -1072875772`)**
+   - **현상**: Windows 컴퓨터 환경에서 OpenCV가 `cv2.VideoCapture(0)` 등 웹캠에 접근할 때 MSMF 백엔드가 동작하며 프레임을 제대로 가져오지 못하는 문제가 발생(화면 끊김/멈춤).
+   - **조치 방안**: 완전히 영상 출력이 불량할 경우 `sources/video_source.py`에서 `cv2.VideoCapture(index, cv2.CAP_DSHOW)` 로 DirectShow 백엔드를 강제 할당하도록 OS 의존성 코드 처리를 추가해야 할 수 있음.
+
+---
+
 ## 새 매장 추가 시
 
 1. 그 매장에서 영상 촬영
