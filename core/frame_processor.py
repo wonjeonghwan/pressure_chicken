@@ -36,7 +36,8 @@ class HybridVibrationTracker:
         self._min_w_activity = motion_cfg.get("rel_x_threshold", 3.0)
         self._body_ratio_mul = motion_cfg.get("body_ratio_multiplier", 1.5)
         self._motion_ratio = motion_cfg.get("min_motion_ratio", 0.15)
-        self._alpha = 0.2
+        self._threshold = motion_cfg.get("threshold", 15)
+        self._alpha = 0.1
         
         self._frame_n: int = 0
         self._cv_hist: deque[bool] = deque(maxlen=self._window)
@@ -122,7 +123,7 @@ class HybridVibrationTracker:
                         
                         if self._prev_roi_gray is not None:
                             diff = cv2.absdiff(self._prev_roi_gray, gray_roi)
-                            _, thresh = cv2.threshold(diff, 15, 255, cv2.THRESH_BINARY)
+                            _, thresh = cv2.threshold(diff, self._threshold, 255, cv2.THRESH_BINARY)
                             changed_pixels = cv2.countNonZero(thresh)
                             changed_ratio = changed_pixels / (32 * 32)
                             
