@@ -40,7 +40,7 @@ def main() -> None:
                         help="RTX 3060 Ti: imgsz=640→16")
     args = parser.parse_args()
 
-    weights = f"yolov8{args.model}.pt"
+    weights = f"yolov8{args.model}-pose.pt"
     print(f"모델: {weights}  |  imgsz: {args.imgsz}  |  epochs: {args.epochs}")
 
     model = YOLO(weights)
@@ -86,13 +86,13 @@ def main() -> None:
         verbose  = True,
     )
 
-    best = Path("runs/detect/pot_detector/weights/best.pt")
+    best = Path("runs/pose/pot_detector/weights/best.pt")
     if best.exists():
         Path("models").mkdir(exist_ok=True)
-        shutil.copy(best, "models/pot_detector.pt")
-        print("✅ 학습 완료 → models/pot_detector.pt")
+        shutil.copy(best, "models/pot_pose.pt")
+        print("학습 완료 → models/pot_pose.pt")
     else:
-        print("❌ 학습 실패. runs/detect/pot_detector/weights/ 확인 필요")
+        print("학습 실패. runs/pose/pot_detector/weights/ 확인 필요")
 
 
 if __name__ == "__main__":

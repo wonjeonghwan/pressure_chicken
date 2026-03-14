@@ -4,10 +4,4 @@ test: ../test/images
 
 nc: 3
 names: ['empty_burner', 'pot_body', 'pot_weight']
-
-roboflow:
-  workspace: personal-ebvkg
-  project: pressure_chicken
-  version: 4
-  license: CC BY 4.0
-  url: https://universe.roboflow.com/personal-ebvkg/pressure_chicken/dataset/4
+kpt_shape: [2, 3]   # 키포인트 2개 (top, bot), 각각 x/y/visibility
