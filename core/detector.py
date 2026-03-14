@@ -27,6 +27,8 @@ class Detection:
     class_id:   int
     confidence: float
     x1: int; y1: int; x2: int; y2: int
+    # YOLO-pose 키포인트: [(x, y, visibility), ...] — None이면 pose 정보 없음
+    keypoints: list[tuple[float, float, float]] | None = None
 
     @property
     def cx(self) -> int:
@@ -119,11 +121,24 @@ class BurnerDetector:
 
         out: list[list[Detection]] = [[] for _ in frames]
         for i, r in zip(valid_idx, results):
-            for box in r.boxes:
+            for j, box in enumerate(r.boxes):
                 cls_id = int(box.cls[0])
                 conf   = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                out[i].append(Detection(cls_id, conf, x1, y1, x2, y2))
+
+                # 키포인트 추출 (YOLO-pose 모델일 때만 존재)
+                kps = None
+                if r.keypoints is not None and j < len(r.keypoints.xy):
+                    xy   = r.keypoints.xy[j].cpu().numpy()    # (K, 2)
+                    conf_kp = (
+                        r.keypoints.conf[j].cpu().numpy()
+                        if r.keypoints.conf is not None
+                        else np.ones(len(xy))
+                    )
+                    kps = [(float(xy[k, 0]), float(xy[k, 1]), float(conf_kp[k]))
+                           for k in range(len(xy))]
+
+                out[i].append(Detection(cls_id, conf, x1, y1, x2, y2, keypoints=kps))
         return out
 
     def detect_opencv(self, roi_frame: np.ndarray) -> tuple[bool, bool]:

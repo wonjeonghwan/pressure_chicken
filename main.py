@@ -47,6 +47,7 @@ def draw_preview(
     burners_cfg: list[dict],
     registry: BurnerRegistry,
     processor: FrameProcessor | None = None,
+    motion_cfg: dict | None = None,
 ) -> int:
     """소스별 영상에 ROI 박스 + 화구번호 + 상태 오버레이 후 cv2 창에 표시."""
     src_burners: dict[int, list[dict]] = {}
@@ -80,12 +81,48 @@ def draw_preview(
                         cv2.putText(vis, f"Pot {b['id']}", (bx1, by1 - 5),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
 
-                # 딸랑이 박스 (노란색)
+                # 딸랑이 박스 (노란색) + dark_threshold 마스크 인셋
                 if b["id"] in processor.last_weight_boxes:
                     wx1, wy1, wx2, wy2 = processor.last_weight_boxes[b["id"]]
                     cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (0, 255, 255), 2)
                     cv2.putText(vis, f"Whistle {b['id']}", (wx1, wy1 - 5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+                    # dark_threshold 마스크 인셋 (딸랑이 박스 오른쪽 옆에 표시)
+                    roi = vis[wy1:wy2, wx1:wx2]
+                    if roi.size > 0:
+                        dark_thr = (motion_cfg or {}).get("dark_threshold", 70)
+                        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                        mask_bin = (gray_roi < dark_thr).astype("uint8") * 255
+                        mask_bgr = cv2.cvtColor(mask_bin, cv2.COLOR_GRAY2BGR)
+                        # 인셋 크기: 딸랑이 박스와 동일, 2배 확대
+                        scale   = max(1, 64 // max(1, wy2 - wy1))
+                        iw = (wx2 - wx1) * scale
+                        ih = (wy2 - wy1) * scale
+                        inset = cv2.resize(mask_bgr, (iw, ih), interpolation=cv2.INTER_NEAREST)
+                        # 인셋 위치: 딸랑이 박스 오른쪽
+                        ix1 = min(wx2 + 4, vis.shape[1] - iw)
+                        iy1 = max(0, wy1)
+                        iy2 = iy1 + ih
+                        ix2 = ix1 + iw
+                        if ix2 <= vis.shape[1] and iy2 <= vis.shape[0]:
+                            vis[iy1:iy2, ix1:ix2] = inset
+                            cv2.rectangle(vis, (ix1, iy1), (ix2, iy2), (0, 255, 255), 1)
+
+                # 무게중심 시각화 (초록 원)
+                if b["id"] in processor.last_centroids:
+                    cx, cy = processor.last_centroids[b["id"]]
+                    cv2.circle(vis, (cx, cy), 6, (0, 255, 0), -1)
+                    cv2.circle(vis, (cx, cy), 7, (0, 0, 0), 1)  # 외곽선
+
+                # 키포인트 시각화 (빨간색 원 + 연결선)
+                if b["id"] in processor.last_keypoints:
+                    kp_t, kp_b = processor.last_keypoints[b["id"]]
+                    pt_top = (int(kp_t[0]), int(kp_t[1]))
+                    pt_bot = (int(kp_b[0]), int(kp_b[1]))
+                    cv2.circle(vis, pt_top, 5, (0, 0, 255), -1)   # 빨간 원 (top)
+                    cv2.circle(vis, pt_bot, 5, (0, 80, 255), -1)  # 주황 원 (bot)
+                    cv2.line(vis, pt_top, pt_bot, (0, 0, 255), 2)  # 연결선
 
         # _PREVIEW_SCALE 적용
         h_img, w_img = vis.shape[:2]
@@ -253,7 +290,7 @@ def run(config: dict, test_frames: int = 0) -> None:
             # 3) 영상 읽기 + 미리보기: 15fps
             if now - _last_frame >= _FRAME_INTERVAL:
                 current_frames = processor.read_frames()
-                cv2_key = draw_preview(current_frames, burners_cfg, registry, processor)
+                cv2_key = draw_preview(current_frames, burners_cfg, registry, processor, motion_cfg)
                 
                 # OpenCV 키 입력 (대소문자 'c'/'C' 처리)
                 if cv2_key != -1:

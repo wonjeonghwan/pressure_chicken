@@ -65,6 +65,8 @@ class BurnerStateMachine:
         # FrameProcessor가 매 감지마다 갱신
         self.weight_detected: bool  = False   # 이번 감지에서 pot_weight 있음
         self.vibration_score: float = 0.0     # 진동 진행도 0.0~1.0
+        self.current_angle:   float | None = None   # 검은 무게중심 상대 x (px, None=미감지)
+        self.angle_deviation: float = 0.0           # 무게중심 x std dev (px)
 
     # ── 외부 이벤트 ────────────────────────────────────────────────────
 

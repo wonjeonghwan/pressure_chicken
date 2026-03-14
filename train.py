@@ -45,7 +45,7 @@ def main() -> None:
 
     model = YOLO(weights)
 
-    model.train(
+    result = model.train(
         data    = DATA_YAML,
         epochs  = args.epochs,
         imgsz   = args.imgsz,
@@ -86,13 +86,19 @@ def main() -> None:
         verbose  = True,
     )
 
-    best = Path("runs/pose/pot_detector/weights/best.pt")
+    best = Path(result.save_dir) / "weights/best.pt"
     if best.exists():
         Path("models").mkdir(exist_ok=True)
-        shutil.copy(best, "models/pot_pose.pt")
-        print("학습 완료 → models/pot_pose.pt")
+        dest = Path("models/pot_pose.pt")
+        if dest.exists():
+            import time
+            backup = Path(f"models/pot_pose_prev_{int(time.time())}.pt")
+            dest.rename(backup)
+            print(f"기존 모델 백업 → {backup.name}")
+        shutil.copy(best, dest)
+        print(f"학습 완료 → {dest}  (from {best})")
     else:
-        print("학습 실패. runs/pose/pot_detector/weights/ 확인 필요")
+        print(f"학습 실패. {best} 확인 필요")
 
 
 if __name__ == "__main__":
