@@ -127,14 +127,14 @@ class FrameDiffTracker:
             # 딸랑이 EMA 위치 업데이트 (내부 60% 영역)
             self._w_cx = self._ema(self._w_cx, (wx1 + wx2) / 2,       a)
             self._w_cy = self._ema(self._w_cy, (wy1 + wy2) / 2,       a)
-            self._w_w  = self._ema(self._w_w,  (wx2 - wx1) * 0.6,     a)
-            self._w_h  = self._ema(self._w_h,  (wy2 - wy1) * 0.6,     a)
+            self._w_w  = self._ema(self._w_w,  (wx2 - wx1) * 0.8,     a)
+            self._w_h  = self._ema(self._w_h,  (wy2 - wy1) * 0.8,     a)
 
             # 밥솥 바디 EMA 위치 업데이트 (중앙 40% 영역)
             self._p_cx = self._ema(self._p_cx, (x1 + x2) / 2,         a)
             self._p_cy = self._ema(self._p_cy, (y1 + y2) / 2,         a)
-            self._p_w  = self._ema(self._p_w,  (x2 - x1) * 0.4,       a)
-            self._p_h  = self._ema(self._p_h,  (y2 - y1) * 0.4,       a)
+            self._p_w  = self._ema(self._p_w,  (x2 - x1) * 0.5,       a)
+            self._p_h  = self._ema(self._p_h,  (y2 - y1) * 0.5,       a)
 
             self._last_centroid = (int(self._w_cx), int(self._w_cy))
 
@@ -381,7 +381,7 @@ class FrameProcessor:
                     has_wt, w_box, kp_top, kp_bot = matched_has_weight[bid]
                     bwx1, bwy1, bwx2, bwy2 = w_box
                     self.last_matched_boxes[bid] = (x1, y1, x2, y2)
-                    self._body_ttl[bid] = 30  # 최대 30프레임(약 1초) 동안 밥솥 기억
+                    self._body_ttl[bid] = 15  # 최대 15프레임(약 0.5초) 동안 밥솥 기억
                     if has_wt:
                         self.last_weight_boxes[bid] = w_box
                         if kp_top is not None and kp_bot is not None:
