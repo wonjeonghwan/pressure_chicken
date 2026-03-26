@@ -311,14 +311,13 @@ class UIDisplay:
             dot_color = (255, 220, 60) if bsm.weight_detected else (80, 80, 80)
             pygame.draw.circle(self._screen, dot_color, (x + w - _PAD * 2, y + _PAD + 10), 5)
 
-            # 각도 디버그 표시
-            angle_val = getattr(bsm, "current_angle", None)
-            dev_val   = getattr(bsm, "angle_deviation", 0.0)
-            if angle_val is not None:
-                angle_str = f"cx {angle_val:+.1f}px  std {dev_val*100:.1f}%"
-                angle_color = (255, 220, 60)
+            # 진동 판정 디버그 표시 (ncc: 정규화 교차상관, 낮을수록 패턴 변화)
+            ncc_val = getattr(bsm, "current_angle", None)
+            if ncc_val is not None:
+                angle_str   = f"ncc {ncc_val:.3f}"
+                angle_color = (80, 255, 80) if ncc_val < 0.85 else (255, 220, 60)
             else:
-                angle_str  = "cx --"
+                angle_str   = "ncc --"
                 angle_color = (100, 100, 100)
             asurf = self._fonts["small"].render(angle_str, True, angle_color)
             self._screen.blit(asurf, (bar_x, bar_y + bar_h + 4))

@@ -5,8 +5,10 @@
   - 전체 프레임에 대해 YOLO 1회 추론 (pot_body / pot_weight 바운딩박스 색출)
   - 캘리브레이션 ROI의 중심점과 YOLO pot_body 중심점을 거리 기반 매칭
   - 독점 매칭: 각 weight를 x축 거리 기준 가장 가까운 pot 하나에만 배정
-  - EMA 안정화된 고정 창에서 프레임 간 픽셀 diff를 밥솥 바디 diff로 나눠 진동 판별
-    (FrameDiffTracker) — 카메라 흔들림/조명 변화 자동 보정
+  - NCC(정규화 교차상관) 비교로 진동 판별 (FrameDiffTracker)
+    - dark_threshold 불필요 → 전체 grayscale 패턴 비교
+    - 평균 제거 → 조명 변화 / 오토 익스포저 무관
+    - EMA로 위치/크기 안정화 (카메라 흔들림 보정)
 """
 
 from __future__ import annotations
@@ -22,70 +24,64 @@ from core.detector import BurnerDetector, CLASS_POT_BODY, CLASS_POT_WEIGHT
 from core.state_machine import BurnerRegistry, BurnerState
 
 
-# ── 진동 판별기 (프레임 diff + 카메라 보정) ───────────────────────────────────
+# ── 진동 판별기 (NCC + EMA 안정화) ──────────────────────────────────────────
 
 class FrameDiffTracker:
     """
-    딸랑이 영역의 프레임 간 픽셀 diff를 밥솥 바디 diff로 나눠 진동 판별.
+    딸랑이 영역의 NCC(정규화 교차상관) 비교로 진동 판별.
 
     매 프레임:
-      1. YOLO 딸랑이 박스를 EMA로 스무딩 → 고정된 분석 창 위치 확보
-      2. 밥솥 바디 박스도 EMA로 스무딩 → 카메라 움직임 기준점
-      3. 각 창에서 grayscale 크롭 → 이전 프레임과 절대 diff 평균 계산
-      4. diff_ratio = whistle_diff / (pot_diff + 1)
-         - 카메라 흔들림: whistle_diff ≈ pot_diff → ratio ≈ 1 → 무시
-         - 딸랑이 진동: whistle_diff >> pot_diff → ratio 높음 → 감지
+      1. EMA 안정화된 위치/크기로 딸랑이 크롭 (카메라 흔들림 보정)
+      2. 정사각형 패딩 → 32×32 grayscale resize (INTER_LINEAR)
+      3. 표준편차 < MIN_STD 이면 스킵 (너무 균일한 크롭 — 패턴 없음)
+      4. 이전 프레임 크롭과 NCC 비교
+           NCC = Σ(A-μA)(B-μB) / sqrt(Σ(A-μA)² · Σ(B-μB)²)
+           - 평균 제거 → 전역 밝기 변화(오토 익스포저) 무관
+           - NCC ≈ 1.0 → 동일 패턴 → 정지
+           - NCC 낮아짐 → 패턴 변화 → 진동
 
-    window 프레임 중 trigger 개 이상 diff_ratio >= threshold → 진동 확정.
+    window 프레임 중 trigger 개 이상 NCC < ncc_threshold → 진동 확정.
     """
 
+    _CROP_SIZE  = 32
+    _SIZE_ALPHA = 0.15   # 크기 EMA: 느리게 (박스 크기 노이즈 흡수)
+    _POS_ALPHA  = 0.5    # 위치 EMA: 빠르게 (카메라 이동 즉시 추적)
+    _MIN_STD    = 3.0    # 최소 표준편차 (너무 균일하면 스킵)
+
     def __init__(self, motion_cfg: dict):
-        self._window         = motion_cfg.get("window_frames",        30)
-        self._trigger        = motion_cfg.get("trigger_frames",       20)
-        self._ratio_thr      = motion_cfg.get("diff_ratio_threshold", 2.0)   # whistle/pot diff 비율 임계값
-        self._ema_alpha      = motion_cfg.get("ema_alpha",            0.15)  # EMA 속도 (0~1, 클수록 빠름)
+        self._window  = motion_cfg.get("window_frames",  30)
+        self._trigger = motion_cfg.get("trigger_frames", 20)
+        self._ncc_thr = motion_cfg.get("ncc_threshold",  0.85)
 
-        # EMA 안정화된 딸랑이 창 위치
-        self._w_cx: float | None = None
-        self._w_cy: float | None = None
-        self._w_w:  float | None = None
-        self._w_h:  float | None = None
+        self._prev_gray: np.ndarray | None = None
+        self._cv_hist:   deque[bool]       = deque(maxlen=self._window)
+        self._last_ncc:  float             = 1.0
 
-        # EMA 안정화된 밥솥 바디 창 위치
-        self._p_cx: float | None = None
-        self._p_cy: float | None = None
-        self._p_w:  float | None = None
-        self._p_h:  float | None = None
-
-        # 이전 프레임 그레이스케일 크롭 (diff 계산용)
-        self._prev_w: np.ndarray | None = None
-        self._prev_p: np.ndarray | None = None
-
-        self._cv_hist: deque[bool] = deque(maxlen=self._window)
-        self._last_ratio:    float = 0.0   # 디버그: 마지막 diff ratio
-        self._last_centroid: tuple[int, int] | None = None  # 시각화: EMA 딸랑이 중심
+        self._cx: float | None = None
+        self._cy: float | None = None
+        self._w:  float | None = None
+        self._h:  float | None = None
+        self._last_centroid: tuple[int, int] | None = None
 
     def reset(self) -> None:
-        self._w_cx = self._w_cy = self._w_w = self._w_h = None
-        self._p_cx = self._p_cy = self._p_w = self._p_h = None
-        self._prev_w = self._prev_p = None
+        self._prev_gray = None
         self._cv_hist.clear()
-        self._last_ratio    = 0.0
+        self._last_ncc  = 1.0
+        self._cx = self._cy = self._w = self._h = None
         self._last_centroid = None
 
     @property
     def last_angle(self) -> float | None:
-        """UI 호환용 — diff ratio 반환"""
-        return self._last_ratio if self._last_ratio > 0 else None
+        """UI 호환용 — NCC 반환 (None이면 아직 비교 없음)"""
+        return self._last_ncc if self._prev_gray is not None else None
 
     @property
     def last_deviation(self) -> float:
-        """UI 호환용 — diff ratio 반환"""
-        return self._last_ratio
+        """UI 호환용 — NCC 반환"""
+        return self._last_ncc
 
     @property
     def last_centroid(self) -> tuple[int, int] | None:
-        """시각화용 — EMA 안정화된 딸랑이 중심"""
         return self._last_centroid
 
     @property
@@ -99,68 +95,72 @@ class FrameDiffTracker:
         return new if prev is None else alpha * new + (1.0 - alpha) * prev
 
     @staticmethod
-    def _crop_gray(frame: np.ndarray, cx: float, cy: float, w: float, h: float) -> np.ndarray | None:
-        """EMA 중심 기준 고정 크기 grayscale 크롭"""
-        x1 = int(round(cx - w / 2))
-        y1 = int(round(cy - h / 2))
-        x2 = x1 + max(1, int(round(w)))
-        y2 = y1 + max(1, int(round(h)))
+    def _get_crop_gray(
+        frame: np.ndarray,
+        cx: float, cy: float, w: float, h: float,
+        crop_size: int,
+    ) -> np.ndarray | None:
+        """EMA 중심/크기 기준 크롭 → 정사각형 패딩 → crop_size×crop_size grayscale"""
         fh, fw = frame.shape[:2]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(fw, x2), min(fh, y2)
-        if x2 <= x1 or y2 <= y1:
+        x1c = max(0, int(round(cx - w / 2)))
+        y1c = max(0, int(round(cy - h / 2)))
+        x2c = min(fw, int(round(cx + w / 2)))
+        y2c = min(fh, int(round(cy + h / 2)))
+        if x2c <= x1c or y2c <= y1c:
             return None
-        crop = frame[y1:y2, x1:x2]
-        return cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+        gray = cv2.cvtColor(frame[y1c:y2c, x1c:x2c], cv2.COLOR_BGR2GRAY)
+        ch, cw = gray.shape
+        side   = max(ch, cw)
+        pad    = np.zeros((side, side), dtype=np.uint8)
+        pad[(side - ch) // 2:(side - ch) // 2 + ch,
+            (side - cw) // 2:(side - cw) // 2 + cw] = gray
+        return cv2.resize(pad, (crop_size, crop_size), interpolation=cv2.INTER_LINEAR)
+
+    @staticmethod
+    def _ncc(a: np.ndarray, b: np.ndarray) -> float:
+        p  = a.astype(np.float32)
+        q  = b.astype(np.float32)
+        pm = p - p.mean()
+        qm = q - q.mean()
+        denom = float(np.sqrt((pm ** 2).sum() * (qm ** 2).sum()))
+        if denom < 1e-6:
+            return 1.0
+        return float((pm * qm).sum() / denom)
 
     def update(
         self,
         frame: np.ndarray,
-        x1: int, y1: int, x2: int, y2: int,   # pot_body 박스
+        _x1: int, _y1: int, _x2: int, _y2: int,
         has_weight: bool = False,
         wx1: int = 0, wy1: int = 0, wx2: int = 0, wy2: int = 0,
     ) -> bool:
         motion = False
-        a = self._ema_alpha
 
         if has_weight and wx2 > wx1 and wy2 > wy1:
-            # 딸랑이 EMA 위치 업데이트 (내부 60% 영역)
-            self._w_cx = self._ema(self._w_cx, (wx1 + wx2) / 2,       a)
-            self._w_cy = self._ema(self._w_cy, (wy1 + wy2) / 2,       a)
-            self._w_w  = self._ema(self._w_w,  (wx2 - wx1) * 0.6,     a)
-            self._w_h  = self._ema(self._w_h,  (wy2 - wy1) * 0.6,     a)
+            self._cx = self._ema(self._cx, (wx1 + wx2) / 2, self._POS_ALPHA)
+            self._cy = self._ema(self._cy, (wy1 + wy2) / 2, self._POS_ALPHA)
+            self._w  = self._ema(self._w,  wx2 - wx1,       self._SIZE_ALPHA)
+            self._h  = self._ema(self._h,  wy2 - wy1,       self._SIZE_ALPHA)
+            self._last_centroid = (int(self._cx), int(self._cy))
 
-            # 밥솥 바디 EMA 위치 업데이트 (중앙 40% 영역)
-            self._p_cx = self._ema(self._p_cx, (x1 + x2) / 2,         a)
-            self._p_cy = self._ema(self._p_cy, (y1 + y2) / 2,         a)
-            self._p_w  = self._ema(self._p_w,  (x2 - x1) * 0.5,       a)
-            self._p_h  = self._ema(self._p_h,  (y2 - y1) * 0.5,       a)
+            curr_gray = self._get_crop_gray(
+                frame, self._cx, self._cy, self._w, self._h, self._CROP_SIZE
+            )
 
-            self._last_centroid = (int(self._w_cx), int(self._w_cy))
-
-            w_gray = self._crop_gray(frame, self._w_cx, self._w_cy, self._w_w, self._w_h)
-            p_gray = self._crop_gray(frame, self._p_cx, self._p_cy, self._p_w, self._p_h)
-
-            if (w_gray is not None and p_gray is not None and
-                    self._prev_w is not None and self._prev_p is not None and
-                    self._prev_w.shape == w_gray.shape and
-                    self._prev_p.shape == p_gray.shape):
-
-                w_diff = float(np.mean(np.abs(w_gray.astype(np.int16) - self._prev_w.astype(np.int16))))
-                p_diff = float(np.mean(np.abs(p_gray.astype(np.int16) - self._prev_p.astype(np.int16))))
-
-                self._last_ratio = w_diff / (p_diff + 1.0)  # +1: 0 나눗셈 방지
-                if self._last_ratio >= self._ratio_thr:
-                    motion = True
-
-            if w_gray is not None:
-                self._prev_w = w_gray
-            if p_gray is not None:
-                self._prev_p = p_gray
+            if curr_gray is not None:
+                std_val = float(curr_gray.astype(np.float32).std())
+                if std_val >= self._MIN_STD and self._prev_gray is not None:
+                    prev_std = float(self._prev_gray.astype(np.float32).std())
+                    if prev_std >= self._MIN_STD:
+                        self._last_ncc = self._ncc(self._prev_gray, curr_gray)
+                        if self._last_ncc < self._ncc_thr:
+                            motion = True
+                self._prev_gray = curr_gray
+            else:
+                self._prev_gray = None
         else:
-            # 딸랑이 미감지: 이전 프레임 초기화 (박스 위치 변화로 인한 false diff 방지)
-            self._prev_w = None
-            self._prev_p = None
+            self._prev_gray = None
 
         self._cv_hist.append(motion)
         return self._check()
