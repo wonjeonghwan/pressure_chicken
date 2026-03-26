@@ -91,7 +91,7 @@ def draw_preview(
                     # dark_threshold 마스크 인셋 (딸랑이 박스 오른쪽 옆에 표시)
                     roi = vis[wy1:wy2, wx1:wx2]
                     if roi.size > 0:
-                        dark_thr = (motion_cfg or {}).get("dark_threshold", 70)
+                        dark_thr = (motion_cfg or {}).get("dark_threshold", 100)
                         gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
                         mask_bin = (gray_roi < dark_thr).astype("uint8") * 255
                         mask_bgr = cv2.cvtColor(mask_bin, cv2.COLOR_GRAY2BGR)

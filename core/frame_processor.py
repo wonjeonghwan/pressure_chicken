@@ -127,8 +127,8 @@ class FrameDiffTracker:
             # 딸랑이 EMA 위치 업데이트 (내부 60% 영역)
             self._w_cx = self._ema(self._w_cx, (wx1 + wx2) / 2,       a)
             self._w_cy = self._ema(self._w_cy, (wy1 + wy2) / 2,       a)
-            self._w_w  = self._ema(self._w_w,  (wx2 - wx1) * 0.8,     a)
-            self._w_h  = self._ema(self._w_h,  (wy2 - wy1) * 0.8,     a)
+            self._w_w  = self._ema(self._w_w,  (wx2 - wx1) * 0.6,     a)
+            self._w_h  = self._ema(self._w_h,  (wy2 - wy1) * 0.6,     a)
 
             # 밥솥 바디 EMA 위치 업데이트 (중앙 40% 영역)
             self._p_cx = self._ema(self._p_cx, (x1 + x2) / 2,         a)
