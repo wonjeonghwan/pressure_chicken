@@ -16,7 +16,7 @@ dataset/labels/
 __pycache__/
 *.pyc
 .DS_Store
-config/store_*.json
+
 # Claude 세션 파일
 .claude/
 

@@ -157,10 +157,8 @@ class FrameDiffTracker:
                         if self._last_ncc < self._ncc_thr:
                             motion = True
                 self._prev_gray = curr_gray
-            else:
-                self._prev_gray = None
-        else:
-            self._prev_gray = None
+            # curr_gray=None 이거나 has_weight=False 인 경우 prev_gray 유지
+            # (딸랑이가 일시적으로 미감지돼도 이전 크롭 기억 → 재감지 시 즉시 NCC 비교 가능)
 
         self._cv_hist.append(motion)
         return self._check()

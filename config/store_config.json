@@ -1,0 +1,193 @@
+{
+  "store_id": "store_001",
+  "store_name": "압구정점",
+  "sources": [
+    {
+      "id": 0,
+      "type": "file",
+      "index": 0,
+      "exposure": -5,
+      "path": "raw\\Sample01.mp4"
+    }
+  ],
+  "ui": {
+    "grid_cols": 6,
+    "window_size": [
+      1280,
+      720
+    ],
+    "window_title": "압력밥솥 타이머"
+  },
+  "motion": {
+    "window_frames": 15,
+    "trigger_frames": 6,
+    "ncc_threshold": 0.85
+  },
+  "model": {
+    "weights": "models/pot_detector.pt",
+    "confidence": 0.5
+  },
+  "burners": [
+    {
+      "id": 1,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        0
+      ],
+      "roi": [
+        1689,
+        109,
+        229,
+        265
+      ]
+    },
+    {
+      "id": 2,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        1
+      ],
+      "roi": [
+        1535,
+        311,
+        337,
+        294
+      ]
+    },
+    {
+      "id": 3,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        2
+      ],
+      "roi": [
+        1301,
+        79,
+        378,
+        287
+      ]
+    },
+    {
+      "id": 4,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        3
+      ],
+      "roi": [
+        1104,
+        344,
+        418,
+        283
+      ]
+    },
+    {
+      "id": 5,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        4
+      ],
+      "roi": [
+        846,
+        73,
+        436,
+        319
+      ]
+    },
+    {
+      "id": 6,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        0,
+        5
+      ],
+      "roi": [
+        652,
+        369,
+        424,
+        317
+      ]
+    },
+    {
+      "id": 7,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        1,
+        0
+      ],
+      "roi": [
+        420,
+        120,
+        417,
+        318
+      ]
+    },
+    {
+      "id": 8,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        1,
+        1
+      ],
+      "roi": [
+        260,
+        411,
+        375,
+        291
+      ]
+    },
+    {
+      "id": 9,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        1,
+        2
+      ],
+      "roi": [
+        90,
+        204,
+        334,
+        274
+      ]
+    },
+    {
+      "id": 10,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "grid_pos": [
+        1,
+        3
+      ],
+      "roi": [
+        3,
+        456,
+        241,
+        258
+      ]
+    }
+  ],
+  "_path": "config/store_config.json"
+}

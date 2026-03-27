@@ -39,6 +39,18 @@ class VideoSource:
             print(f"[VideoSource] 경고: 소스 열기 실패 ({self._cfg}). 빈 프레임으로 동작합니다.")
             self._cap = None
             self.failed = True
+            return
+
+        # 카메라 노출 설정 (카메라 소스 + exposure 키 있을 때만)
+        if src_type == "camera" and "exposure" in self._cfg:
+            # 자동 노출 끄기 (값은 카메라마다 다름: 보통 1=수동, 3=자동)
+            self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+            result = self._cap.set(cv2.CAP_PROP_EXPOSURE, self._cfg["exposure"])
+            actual = self._cap.get(cv2.CAP_PROP_EXPOSURE)
+            if result:
+                print(f"[VideoSource] 노출 설정 완료: {actual}")
+            else:
+                print(f"[VideoSource] 노출 설정 미지원 (카메라 드라이버 불가) — gamma로 대체 권장")
 
     def read(self) -> tuple[bool, np.ndarray | None]:
         """프레임 한 장 읽기. 파일 끝이면 처음부터 루프."""
@@ -63,7 +75,23 @@ class VideoSource:
                 new_h = int(frame.shape[0] * scale)
                 frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
+            gamma = self._cfg.get("gamma")
+            if gamma is not None and gamma != 1.0:
+                frame = self._gamma_lut(frame, gamma)
+
         return ret, frame
+
+    # 감마 보정 LUT (gamma > 1 → 하이라이트 억제 / gamma < 1 → 밝기 증가)
+    _lut_cache: dict[float, np.ndarray] = {}
+
+    @classmethod
+    def _gamma_lut(cls, frame: np.ndarray, gamma: float) -> np.ndarray:
+        if gamma not in cls._lut_cache:
+            cls._lut_cache[gamma] = np.array(
+                [((i / 255.0) ** (1.0 / gamma)) * 255 for i in range(256)],
+                dtype=np.uint8,
+            )
+        return cv2.LUT(frame, cls._lut_cache[gamma])
 
     def release(self) -> None:
         if self._cap is not None:
