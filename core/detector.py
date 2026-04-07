@@ -1,5 +1,5 @@
 """
-YOLO 추론 래퍼 — Phase 2
+YOLO-seg 추론 래퍼
 
 모델 파일이 없으면 자동으로 OpenCV 폴백 모드로 동작하며
 model_missing = True 플래그를 설정한다.
@@ -27,8 +27,10 @@ class Detection:
     class_id:   int
     confidence: float
     x1: int; y1: int; x2: int; y2: int
-    # YOLO-pose 키포인트: [(x, y, visibility), ...] — None이면 pose 정보 없음
+    # pose 키포인트 — seg 모델에서는 None
     keypoints: list[tuple[float, float, float]] | None = None
+    # seg 폴리곤: shape (N, 2), 이미지 좌표계 — None이면 seg 정보 없음
+    mask_xy: np.ndarray | None = None
 
     @property
     def cx(self) -> int:
@@ -129,7 +131,7 @@ class BurnerDetector:
                 # 키포인트 추출 (YOLO-pose 모델일 때만 존재)
                 kps = None
                 if r.keypoints is not None and j < len(r.keypoints.xy):
-                    xy   = r.keypoints.xy[j].cpu().numpy()    # (K, 2)
+                    xy      = r.keypoints.xy[j].cpu().numpy()
                     conf_kp = (
                         r.keypoints.conf[j].cpu().numpy()
                         if r.keypoints.conf is not None
@@ -138,7 +140,14 @@ class BurnerDetector:
                     kps = [(float(xy[k, 0]), float(xy[k, 1]), float(conf_kp[k]))
                            for k in range(len(xy))]
 
-                out[i].append(Detection(cls_id, conf, x1, y1, x2, y2, keypoints=kps))
+                # 세그멘테이션 마스크 폴리곤 추출 (YOLO-seg 모델일 때만 존재)
+                mask_xy = None
+                if r.masks is not None and j < len(r.masks.xy):
+                    pts = r.masks.xy[j]
+                    if len(pts) >= 3:
+                        mask_xy = np.array(pts, dtype=np.float32)
+
+                out[i].append(Detection(cls_id, conf, x1, y1, x2, y2, keypoints=kps, mask_xy=mask_xy))
         return out
 
     def detect_opencv(self, roi_frame: np.ndarray) -> tuple[bool, bool]:

@@ -38,6 +38,8 @@ DEFAULT_CONFIG = "config/store_config.json"
 # 미리보기 창 축소 비율 (1.0 = 원본, 0.4 = 40%)
 _PREVIEW_SCALE = 1.0
 
+# 세그멘테이션 마스크 오버레이 표시 여부 (M 키로 토글)
+_show_mask = True
 
 _CV2_KEY_CAM = ord('c')  # 카메라 전환 키 (cv2 창 포커스 시)
 
@@ -47,9 +49,11 @@ def draw_preview(
     burners_cfg: list[dict],
     registry: BurnerRegistry,
     processor: FrameProcessor | None = None,
-    motion_cfg: dict | None = None,
+    config: dict | None = None,
 ) -> int:
-    """소스별 영상에 ROI 박스 + 화구번호 + 상태 오버레이 후 cv2 창에 표시."""
+    """소스별 영상에 ROI + 감지 결과 + optical flow 오버레이를 cv2 창에 표시."""
+    rms_thr = (config or {}).get("optical_flow", {}).get("rms_threshold", 0.5)
+
     src_burners: dict[int, list[dict]] = {}
     for b in burners_cfg:
         src_burners.setdefault(b["source_id"], []).append(b)
@@ -58,77 +62,86 @@ def draw_preview(
         if frame is None:
             continue
         vis = frame.copy()
+
         for b in src_burners.get(src_id, []):
             roi = b.get("roi")
             if not roi:
                 continue
+            bid = b["id"]
 
-            # 1. 고정 ROI (캘리브레이션 영역 - 옅은 회색)
+            # 1. 캘리브레이션 ROI 경계 (옅은 회색)
             x, y, w, h = roi
             cv2.rectangle(vis, (x, y), (x + w, y + h), (100, 100, 100), 1)
 
-            # 2. 실시간 YOLO 매칭 결과 (바디 & 딸랑이)
-            if processor:
-                # 바디 박스 (상태별 색상)
-                bsm = registry.get(b["id"])
-                if bsm:
-                    r, g, b_val = bsm.color
-                    color_bgr = (b_val, g, r) # RGB to BGR
-                    
-                    if b["id"] in processor.last_matched_boxes:
-                        bx1, by1, bx2, by2 = processor.last_matched_boxes[b["id"]]
-                        cv2.rectangle(vis, (bx1, by1), (bx2, by2), color_bgr, 2)
-                        cv2.putText(vis, f"Pot {b['id']}", (bx1, by1 - 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
+            if not processor:
+                continue
 
-                # 딸랑이 박스 (노란색) + dark_threshold 마스크 인셋
-                if b["id"] in processor.last_weight_boxes:
-                    wx1, wy1, wx2, wy2 = processor.last_weight_boxes[b["id"]]
-                    cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (0, 255, 255), 2)
-                    cv2.putText(vis, f"Whistle {b['id']}", (wx1, wy1 - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            bsm = registry.get(bid)
+            if not bsm:
+                continue
+            r, g, b_val = bsm.color
+            color_bgr = (b_val, g, r)
 
-                    # dark_threshold 마스크 인셋 (딸랑이 박스 오른쪽 옆에 표시)
-                    roi = vis[wy1:wy2, wx1:wx2]
-                    if roi.size > 0:
-                        dark_thr = (motion_cfg or {}).get("dark_threshold", 50)
-                        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                        mask_bin = (gray_roi < dark_thr).astype("uint8") * 255
-                        mask_bgr = cv2.cvtColor(mask_bin, cv2.COLOR_GRAY2BGR)
-                        # 인셋 크기: 딸랑이 박스와 동일, 2배 확대
-                        scale   = max(1, 64 // max(1, wy2 - wy1))
-                        iw = (wx2 - wx1) * scale
-                        ih = (wy2 - wy1) * scale
-                        inset = cv2.resize(mask_bgr, (iw, ih), interpolation=cv2.INTER_NEAREST)
-                        # 인셋 위치: 딸랑이 박스 오른쪽
-                        ix1 = min(wx2 + 4, vis.shape[1] - iw)
-                        iy1 = max(0, wy1)
-                        iy2 = iy1 + ih
-                        ix2 = ix1 + iw
-                        if ix2 <= vis.shape[1] and iy2 <= vis.shape[0]:
-                            vis[iy1:iy2, ix1:ix2] = inset
-                            cv2.rectangle(vis, (ix1, iy1), (ix2, iy2), (0, 255, 255), 1)
+            # 2. 밥솥 bbox (상태 색상)
+            if bid in processor.last_matched_boxes:
+                bx1, by1, bx2, by2 = processor.last_matched_boxes[bid]
+                cv2.rectangle(vis, (bx1, by1), (bx2, by2), color_bgr, 2)
+                cv2.putText(vis, f"Pot {bid}", (bx1, by1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
 
-                # 무게중심 시각화 (초록 원)
-                if b["id"] in processor.last_centroids:
-                    cx, cy = processor.last_centroids[b["id"]]
-                    cv2.circle(vis, (cx, cy), 6, (0, 255, 0), -1)
-                    cv2.circle(vis, (cx, cy), 7, (0, 0, 0), 1)  # 외곽선
+            # 3. 딸랑이 — seg 마스크 오버레이 + bbox + IoU + 점수 바
+            if bid in processor.last_weight_boxes:
+                wx1, wy1, wx2, wy2 = processor.last_weight_boxes[bid]
 
-                # 키포인트 시각화 (빨간색 원 + 연결선)
-                if b["id"] in processor.last_keypoints:
-                    kp_t, kp_b = processor.last_keypoints[b["id"]]
-                    pt_top = (int(kp_t[0]), int(kp_t[1]))
-                    pt_bot = (int(kp_b[0]), int(kp_b[1]))
-                    cv2.circle(vis, pt_top, 5, (0, 0, 255), -1)   # 빨간 원 (top)
-                    cv2.circle(vis, pt_bot, 5, (0, 80, 255), -1)  # 주황 원 (bot)
-                    cv2.line(vis, pt_top, pt_bot, (0, 0, 255), 2)  # 연결선
+                # 3-a. 세그멘테이션 마스크 반투명 오버레이 (M 키로 토글)
+                if _show_mask and bid in processor.last_mask_xys:
+                    pts = processor.last_mask_xys[bid].astype(np.int32)
+                    overlay = vis.copy()
+                    cv2.fillPoly(overlay, [pts], (0, 230, 120))   # 초록-민트
+                    cv2.addWeighted(overlay, 0.35, vis, 0.65, 0, vis)
+                    cv2.polylines(vis, [pts], isClosed=True, color=(0, 255, 150), thickness=2)
+
+                if _show_mask:
+                    # 3-b. 딸랑이 bbox (민트색)
+                    cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (0, 255, 200), 2)
+
+                    # 3-c. optical flow RMS 수치 (bbox 위쪽)
+                    rms = bsm.current_angle
+                    if rms is not None:
+                        rms_color = (0, 80, 255) if rms >= rms_thr else (0, 220, 0)
+                        cv2.putText(vis, f"RMS:{rms:.2f}", (wx1, wy1 - 6),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, rms_color, 1)
+
+                    # 3-d. 움직임 누적 점수 바 (bbox 아래쪽)
+                    score = bsm.vibration_score
+                    bar_x, bar_y = wx1, wy2 + 4
+                    bar_w = wx2 - wx1
+                    bar_h = 6
+                    cv2.rectangle(vis, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h),
+                                  (60, 60, 60), -1)
+                    filled = int(bar_w * min(score, 1.0))
+                    bar_color = (0, 200, 0) if score < 1.0 else (0, 60, 255)
+                    if filled > 0:
+                        cv2.rectangle(vis, (bar_x, bar_y), (bar_x + filled, bar_y + bar_h),
+                                      bar_color, -1)
+
+            # 4. 무게중심 점 (딸랑이 중심) — 마스크 ON일 때만 표시
+            if _show_mask and bid in processor.last_centroids:
+                cx, cy = processor.last_centroids[bid]
+                cv2.circle(vis, (cx, cy), 5, (0, 255, 150), -1)
+                cv2.circle(vis, (cx, cy), 6, (0, 0, 0), 1)
+
+        # 마스크 토글 상태 표시 (우상단)
+        mask_label = "Mask: ON  [M]" if _show_mask else "Mask: OFF [M]"
+        mask_color = (0, 220, 80) if _show_mask else (80, 80, 80)
+        cv2.putText(vis, mask_label, (vis.shape[1] - 160, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, mask_color, 1, cv2.LINE_AA)
 
         # _PREVIEW_SCALE 적용
         h_img, w_img = vis.shape[:2]
         if _PREVIEW_SCALE != 1.0:
             vis = cv2.resize(vis, (int(w_img * _PREVIEW_SCALE), int(h_img * _PREVIEW_SCALE)))
-        
+
         window_name = f"Camera {src_id}"
         
         # 1. 창이 없으면 먼저 만듦 (macOS Cocoa는 미존재 창에 getWindowProperty 호출 시 예외 발생)
@@ -234,8 +247,8 @@ def run(config: dict, test_frames: int = 0) -> None:
     # 3) Detector (YOLO or OpenCV fallback)
     detector = BurnerDetector(weights, confidence, motion_cfg)
 
-    # 4) FrameProcessor
-    processor = FrameProcessor(sources, burners_cfg, registry, detector, motion_cfg)
+    # 4) FrameProcessor (Phase 1+2 통합)
+    processor = FrameProcessor(sources, burners_cfg, registry, detector, config)
 
     # 5) UI
     display = UIDisplay(ui_cfg, registry, burner_meta, model_missing=detector.model_missing)
@@ -290,13 +303,17 @@ def run(config: dict, test_frames: int = 0) -> None:
             # 3) 영상 읽기 + 미리보기: 15fps
             if now - _last_frame >= _FRAME_INTERVAL:
                 current_frames = processor.read_frames()
-                cv2_key = draw_preview(current_frames, burners_cfg, registry, processor, motion_cfg)
+                cv2_key = draw_preview(current_frames, burners_cfg, registry, processor, config)
                 
-                # OpenCV 키 입력 (대소문자 'c'/'C' 처리)
+                # OpenCV 키 입력 (대소문자 처리)
                 if cv2_key != -1:
                     key_code = cv2_key & 0xFF
                     if key_code == ord('c') or key_code == ord('C'):
                         trigger_camera_switch()
+                    elif key_code == ord('m') or key_code == ord('M'):
+                        global _show_mask
+                        _show_mask = not _show_mask
+                        print(f"[main] 마스크 오버레이: {'ON' if _show_mask else 'OFF'}")
 
                 _last_frame = now
                 _fps_video_count += 1

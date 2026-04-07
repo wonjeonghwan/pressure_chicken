@@ -61,3 +61,8 @@ uv sync   # 또는 uv run python -m pip install -r requirements.txt
    - 현장 영상(예: 거꾸로 촬영된 앵글)에서 YOLO 네모 박스가 딸랑이를 잘 잡지 못하는 상황이 보인다면, 증강된 데이터셋 파일(`dataset/data.yaml`)을 물려서 `train.py`로 YOLO 가중치(`best.pt`)를 가볍게 최신화해주면 됩니다.
 2. **현장 테스트 및 파라미터 최종 고정**
    - 위에서 설명한 `config.json` 튜닝 값들을 수정해 보시면서 매장마다 최적화된 감도를 찾아냅니다.
+
+
+## 테스트 명령어
+uv run python tests/compare_optical_flow_targeted.py --burner-id 9
+uv run python tests/compare_optical_flow_targeted.py --burner-id 10

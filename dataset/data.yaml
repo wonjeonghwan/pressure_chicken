@@ -1,7 +1,0 @@
-train: train_aug/images
-val: valid_aug/images
-test: ../test/images
-
-nc: 3
-names: ['empty_burner', 'pot_body', 'pot_weight']
-kpt_shape: [2, 3]   # 키포인트 2개 (top, bot), 각각 x/y/visibility

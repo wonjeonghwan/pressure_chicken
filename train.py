@@ -1,9 +1,9 @@
 """
-YOLOv8 학습 스크립트
+YOLOv8 Segmentation 학습 스크립트
 
 사용:
-    uv run python train.py               # 기본 (yolov8n, imgsz=1280)
-    uv run python train.py --model s     # yolov8s 사용 (더 정확, 느림)
+    uv run python train.py               # 기본 (yolov8n-seg, imgsz=640)
+    uv run python train.py --model s     # yolov8s-seg 사용 (더 정확, 느림)
     uv run python train.py --imgsz 640   # 메모리 부족 시
 
 학습 클래스:
@@ -26,7 +26,7 @@ from pathlib import Path
 import torch
 from ultralytics import YOLO  # type: ignore
 
-DATA_YAML = "dataset/data.yaml"
+DATA_YAML = "dataset/data_aug.yaml"
 
 
 def main() -> None:
@@ -40,7 +40,7 @@ def main() -> None:
                         help="RTX 3060 Ti: imgsz=640→16")
     args = parser.parse_args()
 
-    weights = f"yolov8{args.model}-pose.pt"
+    weights = f"yolov8{args.model}-seg.pt"
     print(f"모델: {weights}  |  imgsz: {args.imgsz}  |  epochs: {args.epochs}")
 
     model = YOLO(weights)
@@ -59,7 +59,7 @@ def main() -> None:
         patience = 8,          # 40 epoch 동안 mAP 개선 없으면 자동 종료
 
         # ── 소물체(딸랑이) 감지 강화 ──────────────────────────────────────
-        copy_paste = 0.3,       # 작은 물체를 다른 배경에 복사·붙여넣기 증강
+        copy_paste = 0.0,       # bbox 전용 클래스 혼합 시 마스크 없는 이미지 처리 오류 방지
         mosaic     = 1.0,       # mosaic 증강 (기본값 유지)
         close_mosaic = 20,      # 후반 20 epoch은 mosaic 끔 → 안정화
 
@@ -89,10 +89,10 @@ def main() -> None:
     best = Path(result.save_dir) / "weights/best.pt"
     if best.exists():
         Path("models").mkdir(exist_ok=True)
-        dest = Path("models/pot_pose.pt")
+        dest = Path("models/pot_seg.pt")
         if dest.exists():
             import time
-            backup = Path(f"models/pot_pose_prev_{int(time.time())}.pt")
+            backup = Path(f"models/pot_seg_prev_{int(time.time())}.pt")
             dest.rename(backup)
             print(f"기존 모델 백업 → {backup.name}")
         shutil.copy(best, dest)

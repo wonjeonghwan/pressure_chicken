@@ -311,16 +311,27 @@ class UIDisplay:
             dot_color = (255, 220, 60) if bsm.weight_detected else (80, 80, 80)
             pygame.draw.circle(self._screen, dot_color, (x + w - _PAD * 2, y + _PAD + 10), 5)
 
-            # 진동 판정 디버그 표시 (ncc: 정규화 교차상관, 낮을수록 패턴 변화)
-            ncc_val = getattr(bsm, "current_angle", None)
-            if ncc_val is not None:
-                angle_str   = f"ncc {ncc_val:.3f}"
-                angle_color = (80, 255, 80) if ncc_val < 0.85 else (255, 220, 60)
+            # ── 디버그 수치 (바 아래) ─────────────────────────────
+            debug_y = bar_y + bar_h + 4
+
+            # Phase 2: smoothed RMS (높을수록 전체 움직임 큼)
+            rms_val = getattr(bsm, "current_angle", None)
+            if rms_val is not None:
+                rms_color = (80, 255, 120) if rms_val >= 0.5 else (160, 160, 160)
+                rms_str   = f"P2 RMS {rms_val:.2f}"
             else:
-                angle_str   = "ncc --"
-                angle_color = (100, 100, 100)
-            asurf = self._fonts["small"].render(angle_str, True, angle_color)
-            self._screen.blit(asurf, (bar_x, bar_y + bar_h + 4))
+                rms_color = (80, 80, 80)
+                rms_str   = "P2 RMS --"
+            rms_surf = self._fonts["small"].render(rms_str, True, rms_color)
+            self._screen.blit(rms_surf, (bar_x, debug_y))
+
+            # Phase 3: 주파수 진폭 (높을수록 1~8Hz 진동 강함)
+            amp_val = getattr(bsm, "angle_deviation", 0.0)
+            amp_thr = 0.3  # config amplitude_threshold 기본값
+            amp_color = (80, 200, 255) if amp_val >= amp_thr else (120, 120, 120)
+            amp_str   = f"P3 Amp {amp_val:.2f}"
+            amp_surf  = self._fonts["small"].render(amp_str, True, amp_color)
+            self._screen.blit(amp_surf, (bar_x, debug_y + 16))
 
         # 하단 버튼 행 — 상태에 따라 레이블 변경
         from core.state_machine import BurnerState as BS

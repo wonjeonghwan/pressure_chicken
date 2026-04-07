@@ -7,7 +7,7 @@
       "type": "file",
       "index": 0,
       "exposure": -5,
-      "path": "raw\\Sample01.mp4"
+      "path": "raw\\Sample05.mp4"
     }
   ],
   "ui": {
@@ -18,13 +18,41 @@
     ],
     "window_title": "압력밥솥 타이머"
   },
-  "motion": {
-    "window_frames": 15,
-    "trigger_frames": 6,
-    "ncc_threshold": 0.85
+  "stabilizer": {
+    "enabled": true,
+    "grid_rows": 6,
+    "grid_cols": 8,
+    "lk_win_size": 21,
+    "lk_max_level": 3,
+    "ransac_threshold": 3.0,
+    "smooth_alpha": 0.3,
+    "min_inliers": 6
+  },
+  "optical_flow": {
+    "enabled": true,
+    "farneback_pyr_scale": 0.5,
+    "farneback_levels": 3,
+    "farneback_winsize": 15,
+    "farneback_iterations": 3,
+    "farneback_poly_n": 5,
+    "farneback_poly_sigma": 1.2,
+    "rms_threshold": 0.5,
+    "rms_ema_alpha": 0.35,
+    "max_box_jump_px": 30,
+    "window_frames": 25,
+    "trigger_frames": 14
+  },
+  "frequency": {
+    "enabled": false,
+    "band_low_hz": 1.0,
+    "band_high_hz": 8.0,
+    "amplitude_threshold": 0.3,
+    "amp_ema_alpha": 0.3,
+    "window_frames": 60,
+    "trigger_frames": 20
   },
   "model": {
-    "weights": "models/pot_detector.pt",
+    "weights": "models/pot_seg.pt",
     "confidence": 0.5
   },
   "burners": [
@@ -38,10 +66,10 @@
         0
       ],
       "roi": [
-        1689,
-        109,
-        229,
-        265
+        1456,
+        88,
+        217,
+        210
       ]
     },
     {
@@ -54,10 +82,10 @@
         1
       ],
       "roi": [
-        1535,
-        311,
-        337,
-        294
+        1320,
+        261,
+        298,
+        234
       ]
     },
     {
@@ -70,10 +98,10 @@
         2
       ],
       "roi": [
-        1301,
-        79,
-        378,
-        287
+        1128,
+        74,
+        330,
+        241
       ]
     },
     {
@@ -86,10 +114,10 @@
         3
       ],
       "roi": [
-        1104,
-        344,
-        418,
-        283
+        951,
+        276,
+        359,
+        261
       ]
     },
     {
@@ -102,10 +130,10 @@
         4
       ],
       "roi": [
-        846,
-        73,
-        436,
-        319
+        725,
+        84,
+        394,
+        243
       ]
     },
     {
@@ -118,10 +146,10 @@
         5
       ],
       "roi": [
-        652,
-        369,
-        424,
-        317
+        361,
+        102,
+        351,
+        255
       ]
     },
     {
@@ -134,10 +162,10 @@
         0
       ],
       "roi": [
-        420,
-        120,
-        417,
-        318
+        222,
+        348,
+        311,
+        234
       ]
     },
     {
@@ -150,10 +178,10 @@
         1
       ],
       "roi": [
-        260,
-        411,
-        375,
-        291
+        75,
+        160,
+        282,
+        234
       ]
     },
     {
@@ -166,26 +194,10 @@
         2
       ],
       "roi": [
-        90,
-        204,
-        334,
-        274
-      ]
-    },
-    {
-      "id": 10,
-      "source_id": 0,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "grid_pos": [
-        1,
-        3
-      ],
-      "roi": [
-        3,
-        456,
-        241,
-        258
+        -31,
+        380,
+        240,
+        216
       ]
     }
   ],
