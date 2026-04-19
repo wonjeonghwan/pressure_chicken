@@ -1,6 +1,8 @@
 .venv/
+# 모델 백업 파일 (자동 생성 — 현재 모델 models/pot_seg.pt 만 추적)
+models/*_prev_*.pt
+# YOLO 학습 아웃풋 (runs/train/... — 수백 MB)
 runs/
-models/*.pt
 # 데이터셋 이미지 (대용량 바이너리, Roboflow에서 재다운로드 가능)
 dataset/**/images/
 # 구 경로 호환
@@ -32,6 +34,3 @@ dataset/*_aug/
 # 디버깅용 덤프 이미지/폴더
 debug_*/
 frame_*.jpg
-
-# 모든 경로 모델 가중치 파일
-*.pt

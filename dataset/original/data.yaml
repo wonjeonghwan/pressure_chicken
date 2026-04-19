@@ -7,7 +7,7 @@ names: ['empty_burner', 'pot_body', 'pot_weight']
 
 roboflow:
   workspace: personal-ebvkg
-  project: personal-ebvkg
-  version: dataset
-  license: Private
-  url: https://app.roboflow.com/personal-ebvkg/personal-ebvkg/dataset
+  project: pressure_chicken_segmentation
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/personal-ebvkg/pressure_chicken_segmentation/dataset/1

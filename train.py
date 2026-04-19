@@ -10,13 +10,6 @@ YOLOv8 Segmentation 학습 스크립트
   0: empty_burner  — 빈 화구
   1: pot_body      — 밥솥 몸체
   2: pot_weight    — 딸랑이 (추)  ← 작은 물체, imgsz 크게 잡는 게 핵심
-
-주요 최적화 포인트:
-  - imgsz=640 : Roboflow 640x640 export 기준
-  - epochs=150, patience=40 : 충분한 학습 + early stop
-  - batch=16 : RTX 3060 Ti 기준 imgsz=640 적정값
-  - close_mosaic=20 : 후반 20 epoch에서 mosaic 비활성화 → 안정화
-  - copy_paste=0.3 : 작은 물체(딸랑이) 복사·붙여넣기 증강
 """
 
 import argparse
@@ -35,7 +28,7 @@ def main() -> None:
                         help="YOLOv8 크기: n(빠름) / s(균형) / m(정확)")
     parser.add_argument("--imgsz",  type=int, default=640,
                         help="입력 해상도 (Roboflow 640x640 export 기준)")
-    parser.add_argument("--epochs", type=int, default=150)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch",  type=int, default=16,
                         help="RTX 3060 Ti: imgsz=640→16")
     args = parser.parse_args()
@@ -56,12 +49,12 @@ def main() -> None:
         exist_ok= True,
 
         # ── Early stopping ───────────────────────────────────────────────
-        patience = 8,          # 40 epoch 동안 mAP 개선 없으면 자동 종료
+        patience = 20,          # 40 epoch 동안 mAP 개선 없으면 자동 종료
 
         # ── 소물체(딸랑이) 감지 강화 ──────────────────────────────────────
         copy_paste = 0.0,       # bbox 전용 클래스 혼합 시 마스크 없는 이미지 처리 오류 방지
         mosaic     = 1.0,       # mosaic 증강 (기본값 유지)
-        close_mosaic = 20,      # 후반 20 epoch은 mosaic 끔 → 안정화
+        close_mosaic = 30,      # 후반 30 epoch은 mosaic 끔 → early stop 전 안정화 보장
 
         # ── 학습률 ───────────────────────────────────────────────────────
         lr0  = 0.001,           # 초기 학습률 (0.01에서 0.001로 낮춤 - 파인튜닝 안정성 강화)
@@ -80,6 +73,7 @@ def main() -> None:
         mixup     = 0.1,        # 이미지 겹치기 (유지)
         
         # ── 기타 ─────────────────────────────────────────────────────────
+        workers  = 4,           # CPU 부하 완화 (발열/전력 안정화)
         val      = True,        # 매 epoch 검증
         save     = True,
         plots    = True,        # 학습 곡선 저장

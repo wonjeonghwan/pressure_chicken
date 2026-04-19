@@ -198,15 +198,14 @@ def augment_dataset(image_dir, label_dir, output_img_dir, output_lbl_dir, num_au
     flip_suffixes = ["_hflip", "_vflip", "_hvflip"]
 
     # 랜덤 증강 변환 (num_augments 회 반복)
+    # ※ Flip은 2단계에서 고정 생성하므로 여기선 제외 (중복 방지)
     random_transform = _make_compose([
-        A.RandomRotate90(p=0.5),
+        A.Rotate(limit=40, p=0.8),          # ±40° 연속 회전 (다양한 각도 학습)
         A.Affine(
             translate_percent={"x": (-0.15, 0.15), "y": (-0.15, 0.15)},
             scale=(0.5, 1.5),
             p=0.8,
         ),
-        A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
         A.RandomBrightnessContrast(
             brightness_limit=(-0.3, 0.3),  # 밝기 ±30%
             contrast_limit=(-0.2, 0.2),    # 대비 ±20%
@@ -262,11 +261,15 @@ if __name__ == "__main__":
         num_augments=26,
     )
 
-    print("\n--- Validation 데이터셋 증강 ---")
-    augment_dataset(
-        "dataset/original/valid/images",
-        "dataset/original/valid/labels",
-        "dataset/valid_aug/images",
-        "dataset/valid_aug/labels",
-        num_augments=1,
-    )
+    print("\n--- Validation 데이터셋 복사 (증강 없음) ---")
+    import shutil, glob as _glob
+    for img_path in _glob.glob("dataset/original/valid/images/*.jpg"):
+        dst = Path("dataset/valid_aug/images") / Path(img_path).name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(img_path, dst)
+    for lbl_path in _glob.glob("dataset/original/valid/labels/*.txt"):
+        dst = Path("dataset/valid_aug/labels") / Path(lbl_path).name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(lbl_path, dst)
+    valid_count = len(_glob.glob("dataset/valid_aug/images/*.jpg"))
+    print(f"Validation 원본 {valid_count}장 그대로 복사 완료")

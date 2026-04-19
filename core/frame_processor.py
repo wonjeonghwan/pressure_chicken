@@ -100,6 +100,9 @@ class FrameProcessor:
         self.last_centroids:     dict[int, tuple[int, int]] = {}
         self.last_mask_xys:      dict[int, np.ndarray] = {}
 
+    def oflow(self, bid: int) -> "OpticalFlowDetector | None":
+        return self._oflow.get(bid)
+
     def read_frames(self) -> dict[int, np.ndarray]:
         frames: dict[int, np.ndarray | None] = {}
         for src_id, src in self._sources.items():
@@ -267,7 +270,7 @@ class FrameProcessor:
                     bsm.vibration_score = self._oflow[bid].score
                     # current_angle 에 smoothed RMS 저장 (UI 표시용)
                     bsm.current_angle   = self._oflow[bid].last_smoothed_rms if has_wt else None
-                    bsm.angle_deviation = self._freq[bid].last_amplitude if self._freq_enabled else self._oflow[bid].last_rms
+                    bsm.angle_deviation = self._freq[bid].last_amplitude if self._freq_enabled else self._oflow[bid].last_normalized_rms
 
                 else:
                     if self._body_ttl.get(bid, 0) > 0 and bid in self.last_matched_boxes:

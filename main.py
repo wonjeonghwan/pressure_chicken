@@ -106,13 +106,18 @@ def draw_preview(
                     cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (0, 255, 200), 2)
 
                     # 3-c. optical flow RMS 수치 (bbox 위쪽)
-                    rms = bsm.current_angle
-                    if rms is not None:
-                        rms_color = (0, 80, 255) if rms >= rms_thr else (0, 220, 0)
-                        cv2.putText(vis, f"RMS:{rms:.2f}", (wx1, wy1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, rms_color, 1)
+                    smoothed_rms = bsm.current_angle   # EMA 후
+                    raw_rms      = bsm.angle_deviation  # EMA 전 raw
+                    if smoothed_rms is not None:
+                        rms_color = (0, 80, 255) if smoothed_rms >= rms_thr else (0, 220, 0)
+                        # mask 사용 여부 표시 (M=mask, B=bbox fallback)
+                        mask_flag = "M" if bid in processor.last_mask_xys else "B"
+                        raw_str = f"({raw_rms:.2f})" if raw_rms is not None else ""
+                        label = f"RMS:{smoothed_rms:.2f}{raw_str} [{mask_flag}]"
+                        cv2.putText(vis, label, (wx1, wy1 - 6),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, rms_color, 1)
 
-                    # 3-d. 움직임 누적 점수 바 (bbox 아래쪽)
+                    # 3-d. 점수 바 (bbox 아래쪽)
                     score = bsm.vibration_score
                     bar_x, bar_y = wx1, wy2 + 4
                     bar_w = wx2 - wx1
@@ -208,10 +213,12 @@ def run(config: dict, test_frames: int = 0) -> None:
     weights    = model_cfg.get("weights",    "models/pot_detector.pt")
     confidence = model_cfg.get("confidence", 0.5)
 
+    _FRAME_INTERVAL = 1 / 15   # 영상 디코딩/표시 최대 15fps (4K 부하 절감)
+
     # 1) VideoSource
     sources: dict[int, VideoSource] = {}
     cam_indices: dict[int, int] = {}   # source_id → 현재 카메라 인덱스
-    
+
     config_path = config.get("_path") # pass _path if needed or use global
 
     for sc in sources_cfg:
@@ -229,6 +236,14 @@ def run(config: dict, test_frames: int = 0) -> None:
                 vs = VideoSource(sc)
                 vs.open()
                 
+        # 파일 소스: 실시간 카메라와 동일한 시간축이 되도록 프레임 스킵 계산
+        # skip = round(video_fps / target_fps) → read() 1회당 video에서 skip 프레임 소비
+        if sc.get("type") == "file":
+            target_fps = 1 / _FRAME_INTERVAL  # main 루프 기준 처리 fps (15)
+            skip = max(1, round(vs.fps / target_fps))
+            sc["_skip_frames"] = skip
+            print(f"[main] 파일 소스 {sc['id']}: video={vs.fps:.1f}fps, target={target_fps:.0f}fps → skip={skip}")
+
         sources[sc["id"]] = vs
         if sc.get("type", "camera") == "camera":
             cam_indices[sc["id"]] = sc.get("index", 0)
@@ -261,7 +276,6 @@ def run(config: dict, test_frames: int = 0) -> None:
     import time as _time
     _last_frame      = 0.0
     _last_detect     = 0.0
-    _FRAME_INTERVAL  = 1 / 15   # 영상 디코딩/표시 최대 15fps (4K 부하 절감)
     _DETECT_INTERVAL = 1 / 15   # YOLO 감지 초당 15회 (영상읽기와 동일)
 
     # FPS 측정

@@ -1,8 +1,8 @@
 
-pressure_chicken_segmentation - vdataset personal-ebvkg
+pressure_chicken_segmentation - v1 2026-03-28 1:34am
 ==============================
 
-This dataset was exported via roboflow.com on March 30, 2026 at 10:54 PM GMT
+This dataset was exported via roboflow.com on April 12, 2026 at 10:12 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,7 +17,12 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 129 images.
+The dataset includes 136 images.
 Pot-burner-N6to are annotated in YOLOv8 format.
 
-No pre-processing or augmentation was applied.
+The following pre-processing was applied to each image:
+* Resize to 640x640 (Fit within)
+
+No image augmentation techniques were applied.
+
+

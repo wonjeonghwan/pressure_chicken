@@ -6,29 +6,38 @@
 각 화구의 압력밥솥 딸랑이(추)가 움직이기 시작하면 자동으로 카운트다운 타이머를 시작하는
 비전 기반 모니터링 시스템.
 
-**인터넷 연결**: 학습 시 `yolov8n.pt` 베이스 모델 최초 1회 다운로드만 필요.
+**인터넷 연결**: 학습 시 `yolov8n-seg.pt` 베이스 모델 최초 1회 다운로드만 필요.
 이후 실행(운영)은 인터넷 없이 완전히 로컬에서 동작.
 
 ---
 
-## 감지해야 할 것 (핵심)
+## 타이머 사이클 & 잠금 규칙
 
-1. **화구에 밥솥이 있는가 없는가**
-2. **딸랑이가 밥솥 몸체 기준으로 상대적으로 움직이고 있는가**
-   - 밥솥 전체가 이동한 것과 딸랑이만 진동하는 것을 구분
-   - 연기/가림으로 인한 픽셀 변화와 실제 딸랑이 진동을 구분
-3. **타이머가 한 번 시작되면 외부 감지 결과와 무관하게 독립 동작**
+### 타이머 사이클
+```
+밥솥 올라옴 → 딸랑이 감지 → 초벌 12분 시작
+초벌 완료 → 딸랑이 재감지 → 재벌 5분 시작
+재벌 완료 → 경보
+밥솥 이탈 (어느 단계든) → 전체 리셋 → 새 사이클
+```
+
+### 타이머 잠금
+- 타이머 진행 중에는 카메라 감지 결과로 상태가 자동 변경되지 않음
+- 딸랑이가 가려졌다가 다시 보여도 "또 시작"으로 오인하지 않음
+- **수동 조작만** 상태를 바꿀 수 있음 (R키 초기화, S키/▶버튼 강제시작)
 
 ---
 
-## 화구 상태 정의
+## 화구 상태 정의 (6개)
 
 | 상태 | 설명 | UI 색상 |
 |------|------|---------|
 | `EMPTY` | 빈 화구 (밥솥 미감지) | 회색 |
-| `POT_IDLE` | 밥솥 감지, 딸랑이 정지 | 파란색 |
-| `POT_STEAMING` | 딸랑이 진동 확정 → 타이머 진행 중 | 초록색 |
-| `DONE` | 타이머 완료 | 빨간색 점멸 |
+| `POT_IDLE` | 밥솥 감지, 대기 중 | 파란색 |
+| `POT_STEAMING_FIRST` | 초벌 12분 타이머 진행 중 | 초록색 |
+| `DONE_FIRST` | 초벌 완료, 재벌 딸랑이 대기 | 노란색 |
+| `POT_STEAMING_SECOND` | 재벌 5분 타이머 진행 중 | 진한 초록 |
+| `DONE_SECOND` | 재벌 완료, 경보 | 빨간색 점멸 |
 
 ---
 
@@ -36,10 +45,6 @@
 
 ```yaml
 # dataset/dataset.yaml
-path: ./dataset
-train: images/train
-val: images/val
-
 nc: 3
 names:
   0: empty_burner   # 빈 화구 (밥솥 없음)
@@ -47,82 +52,33 @@ names:
   2: pot_weight     # 딸랑이 (추)
 ```
 
-**왜 3개인가:**
-- `empty_burner`: 빈 화구를 명시적으로 학습 → 오탐 감소
-- `pot_body`: 밥솥 전체 이동의 기준점 → 딸랑이의 상대적 움직임 계산에 필수
-- `pot_weight`: 딸랑이 위치 추적 → 진동 패턴 감지
+현재 모델: `models/pot_seg.pt` (yolov8n-seg 기반 segmentation 모델)
 
 ---
 
-## 감지 구조
-
-### 딸랑이 진동 판별 로직
-
-단순 픽셀 diff 대신 **딸랑이 중심점의 상대적 이동**을 추적.
-
-```
-매 프레임:
-  pot_body 중심점 (bx, by) 추출
-  pot_weight 중심점 (wx, wy) 추출
-          ↓
-  상대 위치 계산:
-    rel_x = wx - bx
-    rel_y = wy - by
-          ↓
-  rel_x, rel_y 의 시계열 변화 추적
-          ↓
-  판별:
-    pot_body 고정 + rel_x 좌우 반복 진동 → 딸랑이 진동 (타이머 트리거)
-    pot_body 크게 이동                   → 밥솥 전체 이동 → 무시
-    pot_weight confidence 급락/소멸      → 연기/가림 → 무시
-```
-
-### 진동 확정 조건 (오탐 방지)
-
-```
-60프레임 윈도우 내에서:
-  - pot_body 이동량 < 10px (밥솥 고정 확인)
-  - pot_weight confidence >= 0.5
-  - rel_x 변화가 ±3px 이상 진동을 40프레임 이상 감지
-          ↓
-  → 진동 확정 → POT_STEAMING 진입
-```
-
-단순 "N프레임 연속" 방식 대신 **윈도우 내 비율** 방식 사용.
-1프레임 끊겨도 리셋되지 않음.
-
-### 전체 처리 흐름
+## 현재 확정된 감지 스택
 
 ```
 영상 프레임 입력
-      ↓
-YOLO 추론
-  ├─ empty_burner 감지 or 아무것도 없음 → 상태: EMPTY
-  ├─ pot_body만 감지 (pot_weight 없음)  → 상태: POT_IDLE (밥솥은 있으나 딸랑이 미확인)
-  └─ pot_body + pot_weight 모두 감지
-          ↓
-    상대 위치(rel_x, rel_y) 계산
-          ↓
-    진동 확정 조건 충족?
-    ├─ No  → 상태: POT_IDLE
-    └─ Yes → 상태: POT_STEAMING, 타이머 시작
-                    ↓
-              [타이머 잠금 — 이후 감지 결과 무시]
-                    ↓
-              타이머 0초 도달 → DONE (점멸)
-                    ↓
-              수동 초기화 or 자동 초기화 → EMPTY
+  ↓
+Phase 1: Stabilizer (core/stabilizer.py)
+  - LK 특징점 추적 + RANSAC + EMA warpAffine
+  - 카메라 흔들림 제거
+  ↓
+YOLO-seg 배치 추론 (ROI 전체 1회 호출, 15fps)
+  ↓
+body/weight 매칭 (ROI 중심거리 기반 그리디)
+  ↓
+Phase 2: OpticalFlowDetector (core/optical_flow.py)
+  - Farneback dense flow
+  - crop 위치: bbox center EMA (pos_alpha=0.3) — mask 유무 무관하게 항상 bbox center 기준
+  - RMS 계산: mask_xy 폴리곤 내부 픽셀만 (mask 없는 프레임은 bbox 전체 fallback)
+  - RMS EMA 스무딩 (alpha=0.35) + window 투표 (25프레임, 14개 이상 → STEAMING)
+  ↓
+상태머신 갱신 (core/state_machine.py)
 ```
 
-### 타이머 잠금 규칙
-
-```
-POT_STEAMING 진입 순간:
-  - 해당 화구의 감지 루프 결과를 상태 변경에 사용하지 않음
-  - 타이머만 독립적으로 tick
-  - 사람이 가리든, 연기가 생기든, 밥솥을 잠깐 들든 → 타이머 유지
-  - 오직 수동 초기화(R키 or UI 버튼)만 타이머 중단 가능
-```
+**Phase 3 (주파수 분석)**: 시도했으나 실패 → 비활성화. 상세 이유는 ACTION_PLAN.md 참조.
 
 ---
 
@@ -137,28 +93,21 @@ POT_STEAMING 진입 순간:
 │   1번    │   2번    │   3번    │   ...           │
 │  3:42    │  대기    │  완료!   │                 │
 │  ⟳  ▶  │  ⟳  ▶  │  ⟳  ▶  │                 │
-├──────────┼──────────┼──────────┤                 │
-│   4번    │   5번    │   6번    │                 │
-│  대기    │  1:15    │  대기    │                 │
-│  ⟳  ▶  │  ⟳  ▶  │  ⟳  ▶  │                 │
 └──────────┴──────────┴──────────┴─────────────────┘
 [선택: 1번 화구]  R: 초기화   S: 수동시작   ESC: 선택해제
 ```
 
-### 버튼 동작
+### 키/버튼 동작
 
 | 버튼/키 | 동작 |
 |---------|------|
 | 화구 카드 클릭 | 해당 화구 선택 (테두리 강조) |
-| `⟳` 버튼 or `R` | 선택 화구 타이머 초기화 → EMPTY |
-| `▶` 버튼 or `S` | 선택 화구 타이머 강제 시작 → POT_STEAMING |
+| `⟳` 버튼 or `R` | 선택 화구 타이머 초기화 → EMPTY (길게 누르기 1초) |
+| `▶` 버튼 or `S` | 선택 화구 타이머 강제 시작 → POT_STEAMING (즉시) |
 | `ESC` | 선택 해제 |
-| `1`~`9`, `0` | 1번~10번 화구 선택 (11번 이상은 마우스 클릭으로 선택)
-
-### UI 주의사항
-- `⟳`(초기화) 버튼은 실수 방지를 위해 **클릭 후 1초 내 재확인** 또는 **길게 누르기(1초)** 방식으로 구현
-- `▶`(수동시작)은 단순 클릭으로 즉시 동작
-- DONE 상태(빨간 점멸) 화구는 클릭 한 번으로 바로 초기화 가능 (확인 불필요)
+| `1`~`9`, `0` | 1번~10번 화구 선택 |
+| `M` | 세그멘테이션 마스크 오버레이 토글 |
+| `C` | 카메라 전환 |
 
 ---
 
@@ -166,36 +115,34 @@ POT_STEAMING 진입 순간:
 
 ```
 pressure_timer/
-├── CLAUDE.md
+├── CLAUDE.md                    # 시스템 설계 & 불변 지식 (이 파일)
+├── ACTION_PLAN.md               # 진행 상황 & 설계 이력 & 미결 과제
 ├── pyproject.toml
 ├── requirements.txt
-├── .gitignore
-├── .python-version
 ├── main.py                      # 진입점
+├── calibration.py               # ROI 캘리브레이션 (드래그 기반)
 ├── train.py                     # YOLO 학습 스크립트
 ├── extract_frames.py            # 영상에서 프레임 추출
+├── augment_dataset.py           # 데이터 증강 파이프라인
+├── diag_rms.py                  # RMS 진단 스크립트 (FP 원인 분석, 화구별 per-frame 출력)
 ├── core/
-│   ├── __init__.py
-│   ├── state_machine.py         # 화구별 상태 + 타이머 (잠금 로직 포함)
-│   ├── frame_processor.py       # YOLO + 상대좌표 계산 + 진동 판별
-│   └── detector.py              # YOLO 추론 래퍼
+│   ├── state_machine.py         # 6상태 머신 + 타이머 + 잠금 로직
+│   ├── frame_processor.py       # Phase 1+2 통합, body/weight 매칭
+│   ├── detector.py              # YOLO-seg 추론 래퍼 (mask_xy 포함)
+│   ├── stabilizer.py            # Phase 1: LK+RANSAC+EMA 흔들림 보정
+│   ├── optical_flow.py          # Phase 2: Farneback RMS + EMA + window
+│   └── frequency_filter.py      # Phase 3: IIR bandpass (현재 비활성화)
 ├── sources/
-│   ├── __init__.py
-│   └── video_source.py          # 카메라/파일 입력 추상화
+│   ├── video_source.py          # 카메라/파일 입력 추상화
+│   └── camera_utils.py          # 카메라 전환 유틸
 ├── ui/
-│   ├── __init__.py
 │   └── ui_display.py            # pygame UI (수동 조작 포함)
+├── tests/
+│   └── compare_phase3.py        # Phase 3 시각 비교 뷰어
 ├── models/
-│   └── .gitkeep
+│   └── pot_seg.pt               # 현재 학습된 모델
 ├── dataset/
-│   ├── images/
-│   │   ├── train/
-│   │   └── val/
-│   ├── labels/
-│   │   ├── train/
-│   │   └── val/
 │   └── dataset.yaml
-├── runs/
 └── config/
     └── store_config.json
 ```
@@ -204,27 +151,23 @@ pressure_timer/
 
 ## 환경 설정
 
-### uv 사용 (권장)
+### 실행 방법
 
 ```bash
-# uv 설치 (최초 1회)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 프로젝트 셋업
-cd pressure_timer
-uv sync
-
-# 실행
+# 기본 실행 (카메라)
 uv run python main.py
-uv run python train.py
-```
 
-### pip 사용 (대안)
+# 내부 영상으로 캘리브레이션
+uv run python main.py --source-0 raw/Side_01.mov --calibrate
 
-```bash
-python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+# 내부 영상으로 실행
+uv run python main.py --source-0 raw/Side_01.mov
+
+# config 지정
+uv run python main.py --config config/store_001.json
+
+# N프레임 후 자동 종료 (테스트용)
+uv run python main.py --test 60
 ```
 
 ### pyproject.toml
@@ -240,153 +183,6 @@ dependencies = [
     "pygame>=2.5.0",
     "numpy>=1.24.0",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-```
-
-### requirements.txt
-
-```
-ultralytics>=8.0.0
-opencv-python>=4.8.0
-pygame>=2.5.0
-numpy>=1.24.0
-```
-
-### .python-version
-
-```
-3.11
-```
-
-### .gitignore
-
-```
-.venv/
-runs/
-models/*.pt
-dataset/images/
-dataset/labels/
-*.mp4
-*.avi
-*.mov
-__pycache__/
-*.pyc
-.DS_Store
-config/store_*.json
-```
-
----
-
-## Step 1. 영상에서 프레임 추출
-
-```bash
-uv run python extract_frames.py --video 녹화영상.mp4 --fps 2
-```
-
-`extract_frames.py`:
-```python
-import cv2, os, argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--video', required=True)
-parser.add_argument('--fps', type=float, default=2)
-args = parser.parse_args()
-
-os.makedirs('dataset/images/train', exist_ok=True)
-
-cap = cv2.VideoCapture(args.video)
-video_fps = cap.get(cv2.CAP_PROP_FPS)
-interval = max(1, int(video_fps / args.fps))  # 최소 1 보장
-
-count, saved = 0, 0
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
-    if count % interval == 0:
-        cv2.imwrite(f'dataset/images/train/frame_{saved:04d}.jpg', frame)
-        saved += 1
-    count += 1
-
-cap.release()
-print(f'{saved}장 추출 완료 → dataset/images/train/')
-```
-
----
-
-## Step 2. 라벨링
-
-1. [roboflow.com](https://roboflow.com) → 무료 계정 생성
-2. New Project → Object Detection
-3. `dataset/images/train/` 이미지 전체 업로드
-4. 클래스 3개 등록 (순서 중요): `empty_burner`, `pot_body`, `pot_weight`
-5. 박스 라벨링:
-   - 빈 화구 전체 영역 → `empty_burner`
-   - 밥솥 몸체(뚜껑 포함) 영역 → `pot_body`
-   - 딸랑이(추) 영역만 → `pot_weight`
-6. Generate → train 80% / val 20% 자동 분리
-7. Export → **YOLOv8 형식** 다운로드
-8. 다운받은 내용을 `dataset/` 폴더에 덮어쓰기
-9. `dataset/dataset.yaml`의 클래스 순서가 `empty_burner(0)`, `pot_body(1)`, `pot_weight(2)` 인지 반드시 확인
-
----
-
-## Step 3. 학습
-
-```bash
-uv run python train.py
-```
-
-`train.py`:
-```python
-import shutil
-from pathlib import Path
-from ultralytics import YOLO
-import torch
-
-model = YOLO('yolov8n.pt')  # 최초 실행 시 인터넷 필요 (자동 다운로드)
-
-results = model.train(
-    data='dataset/dataset.yaml',
-    epochs=50,
-    imgsz=640,
-    batch=8,        # 메모리 부족 시 4로 줄이기
-    device='0' if torch.cuda.is_available() else 'cpu',
-    project='runs',
-    name='pot_detector',
-    exist_ok=True,
-)
-
-best = Path('runs/pot_detector/weights/best.pt')
-if best.exists():
-    Path('models').mkdir(exist_ok=True)
-    shutil.copy(best, 'models/pot_detector.pt')
-    print("✅ 학습 완료. models/pot_detector.pt 저장됨")
-else:
-    print("❌ 학습 실패. runs/pot_detector/weights/ 확인 필요")
-```
-
-**학습 시간 참고:**
-- 노트북 CPU: 약 1~3시간 (데이터 200장 기준)
-- 노트북 GPU (CUDA): 약 10~20분
-- 전원 연결 필수
-
----
-
-## Step 4. 실행
-
-```bash
-# 녹화 영상으로 테스트
-uv run python main.py --source-0 video_a.mp4
-
-# 카메라 실시간
-uv run python main.py
-
-# 매장 config 지정
-uv run python main.py --config config/store_001.json
 ```
 
 ---
@@ -396,66 +192,42 @@ uv run python main.py --config config/store_001.json
 ```json
 {
   "store_id": "store_001",
-  "store_name": "매장명",
   "sources": [
-    {"id": 0, "type": "camera", "index": 0},
-    {"id": 1, "type": "camera", "index": 1}
+    {"id": 0, "type": "camera", "index": 0}
   ],
   "ui": {
     "grid_cols": 6,
     "window_size": [1280, 720]
   },
-  "motion": {
-    "window_frames": 60,
-    "trigger_frames": 40,
-    "rel_x_threshold": 5,
-    "body_move_limit": 10,
-    "min_confidence": 0.5
+  "optical_flow": {
+    "rms_threshold": 0.5,
+    "rms_ema_alpha": 0.35,
+    "window_frames": 25,
+    "trigger_frames": 14
+  },
+  "frequency": {
+    "enabled": false
   },
   "model": {
-    "weights": "models/pot_detector.pt",
+    "weights": "models/pot_seg.pt",
     "confidence": 0.5
   },
   "burners": [
-    {"id": 1, "source_id": 0, "countdown_seconds": 300, "grid_pos": [0, 0]},
-    {"id": 2, "source_id": 0, "countdown_seconds": 300, "grid_pos": [0, 1]}
+    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "grid_pos": [0, 0]}
   ]
 }
 ```
 
 ---
 
-## 구현 순서 (클로드코드 작업 순서)
+## OS 간 호환성 주의사항
 
-1. `core/state_machine.py` — 상태 정의, 타이머, 잠금 로직, 수동 조작 메서드
-2. `sources/video_source.py` — 카메라/파일 입력 추상화
-3. `core/detector.py` — YOLO 추론 래퍼 (클래스별 bounding box 반환)
-4. `core/frame_processor.py` — 상대좌표 계산, 진동 윈도우 판별
-5. `ui/ui_display.py` — pygame UI, 화구 카드, 수동 조작 버튼/키
-6. `extract_frames.py` — 프레임 추출 유틸
-7. `train.py` — 학습 스크립트
-8. `main.py` — 전체 통합
+### 1. CLI 인자 덮어쓰기 버그 (2026-03-11)
 
----
+- **현상**: `apply_source_overrides` 함수 유실 → Windows에서 `--source-0` 인자 무시 + `NameError`
+- **원칙**: `.json` 설정 파일은 항상 카메라(`"type": "camera", "index": 0`)를 기본값으로 유지. 테스트용 영상은 CLI 인자(`--source-0`)로 덮어씌워 사용.
 
-## 💻 OS 간 호환성 주의사항 (Mac vs Windows)
+### 2. Windows 웹캠 MSMF 에러 (`Error: -1072875772`)
 
-1. **CLI 인자 덮어쓰기 (`--source-0` 등) 버그 기록 (2026-03-11)**
-   - **현상**: Mac에서 구성 유틸리티 분리/리팩토링 과정 중 `apply_source_overrides` 함수가 유실되어, Windows에서 `git pull` 이후 비디오 소스 인수를 인식하지 못하고 `NameError`가 발생함.
-   - **조치 사항**: `main.py`에 `apply_source_overrides` 함수를 원상복구하여 해결. 또한 `.json` 설정 파일은 환경끼리 충돌할 수 있으므로, 기본값을 항상 카메라(`"type": "camera", "index": 0`)로 세팅해 두고 테스트용/녹화영상은 CLI 인자로 덮어씌워 사용하는 것을 권장.
-
-2. **Windows 디폴트 웹캠 MSMF 에러 (`Error: -1072875772`)**
-   - **현상**: Windows 컴퓨터 환경에서 OpenCV가 `cv2.VideoCapture(0)` 등 웹캠에 접근할 때 MSMF 백엔드가 동작하며 프레임을 제대로 가져오지 못하는 문제가 발생(화면 끊김/멈춤).
-   - **조치 방안**: 완전히 영상 출력이 불량할 경우 `sources/video_source.py`에서 `cv2.VideoCapture(index, cv2.CAP_DSHOW)` 로 DirectShow 백엔드를 강제 할당하도록 OS 의존성 코드 처리를 추가해야 할 수 있음.
-
----
-
-## 새 매장 추가 시
-
-1. 그 매장에서 영상 촬영
-2. `extract_frames.py`로 프레임 추출
-3. 기존 `dataset/images/train/`에 추가
-4. Roboflow에서 추가 라벨링 후 재export
-5. `uv run python train.py` 재학습
-6. `models/pot_detector.pt` 교체
-7. 해당 매장 `store_config.json` 작성 후 실행
+- **현상**: `cv2.VideoCapture(0)` 사용 시 MSMF 백엔드가 프레임을 제대로 가져오지 못함
+- **조치**: `sources/video_source.py`에서 `cv2.VideoCapture(index, cv2.CAP_DSHOW)` 로 DirectShow 강제 지정
