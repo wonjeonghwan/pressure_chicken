@@ -56,7 +56,7 @@ def run_calibration(config_path: str, config: dict | None = None) -> None:
     대화형 ROI 캘리브레이션.
 
     드래그로 화구 영역을 하나씩 지정하고 Space로 확정.
-    ESC를 누르면 지정된 화구만 저장하고 종료.
+    Q를 누르면 지정된 화구만 저장하고 종료.
     기존 store_config.json의 burners는 덮어씌워짐.
 
     조작:
@@ -64,7 +64,7 @@ def run_calibration(config_path: str, config: dict | None = None) -> None:
       Space/Enter  : 현재 박스 화구로 확정 (다음 화구로)
       z            : 마지막 추가 화구 취소
       r            : 현재 드래그 다시 그리기
-      ESC          : 저장 후 종료
+      Q            : 저장 후 종료
     """
     global _drag_done, _drag_start, _drag_end
 
@@ -98,10 +98,10 @@ def run_calibration(config_path: str, config: dict | None = None) -> None:
     print("  Space/Enter    : 확정 → 다음 화구")
     print("  z              : 마지막 화구 취소")
     print("  r              : 다시 그리기")
-    print("  ESC            : 저장 후 종료")
+    print("  Q              : 저장 후 종료")
     print("=" * 60)
 
-    win = "ROI Calibration | drag=add  Space=confirm  z=undo  ESC=save&exit"
+    win = "ROI Calibration | drag=add  Space=confirm  z=undo  Q=save&exit"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.setMouseCallback(win, _mouse_cb)
 
@@ -136,13 +136,13 @@ def run_calibration(config_path: str, config: dict | None = None) -> None:
         h_img   = display.shape[0]
         cv2.putText(display, f"Burner #{next_id} | confirmed: {len(burners)}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(display, "Space:confirm  z:undo  ESC:save&exit",
+        cv2.putText(display, "Space:confirm  z:undo  Q:save&exit",
                     (10, h_img - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
 
         cv2.imshow(win, display)
         key = cv2.waitKey(30) & 0xFF
 
-        if key == 27:  # ESC → 저장 후 종료
+        if key == ord("q"):  # Q → 저장 후 종료
             break
 
         if key in (13, 32):  # Space / Enter → 확정

@@ -17,7 +17,8 @@ pygame 타이머 UI — Phase 1
   - 키 R             → 선택 화구 초기화
   - 키 S             → 선택 화구 수동 시작
   - 키 1~9, 0        → 1~10번 화구 선택
-  - ESC              → 선택 해제
+  - ESC              → 선택 해제 (선택 없을 때 무시)
+  - Q                → 종료
 """
 
 from __future__ import annotations
@@ -119,11 +120,13 @@ class UIDisplay:
         return False
 
     def _on_keydown(self, key: int) -> bool:
+        if key == pygame.K_q:
+            return True  # 종료
+
         if key == pygame.K_ESCAPE:
             if self._selected_id is not None:
                 self._selected_id = None
-                return False
-            return True  # 선택 없으면 종료
+            return False
 
         # 숫자 키로 화구 선택
         num_map = {
@@ -397,7 +400,7 @@ class UIDisplay:
         if self._selected_id is not None:
             row1 = f"[{self._selected_id}번 화구]  R: 초기화   S: 수동시작/다음단계   ESC: 선택해제"
         else:
-            row1 = "카드 클릭 또는 숫자키(1~0)로 화구 선택  |  ESC: 종료"
+            row1 = "카드 클릭 또는 숫자키(1~0)로 화구 선택  |  Q: 종료"
 
         # 아래줄: 상태 선례
         row2 = "■파랑=준비  ■연두=초벌진행  ■노랑=초벌완료/재벌대기  ■진녹=재벌진행  ■빨강=완료 │ 버튼: [초기화] 길게누름(잠금) / [▶단추] 다음단계"

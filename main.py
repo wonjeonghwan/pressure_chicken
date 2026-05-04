@@ -269,7 +269,7 @@ def run(config: dict, test_frames: int = 0) -> None:
     display = UIDisplay(ui_cfg, registry, burner_meta, model_missing=detector.model_missing)
     display.init()
 
-    print("[main] 시작. ESC 로 종료.")
+    print("[main] 시작. Q 로 종료.")
     if detector.model_missing:
         print("[main] 테스트 모드: 자동 감지 비활성화. ▶ 버튼으로 수동 시작 가능.")
 

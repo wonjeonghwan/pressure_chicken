@@ -65,11 +65,11 @@ class VideoSource:
 
         # 파일 소스: target_fps 기준으로 프레임 스킵 (실시간 카메라와 동일한 시간축 유지)
         # _skip_frames = round(video_fps / target_fps), main.py에서 주입
+        # grab()은 픽셀 디코딩 없이 프레임 포인터만 전진 → seek보다 훨씬 빠름
         if ret and self._cfg.get("type") == "file":
             skip = self._cfg.get("_skip_frames", 1)
-            if skip > 1:
-                pos = self._cap.get(cv2.CAP_PROP_POS_FRAMES)
-                self._cap.set(cv2.CAP_PROP_POS_FRAMES, pos + skip - 1)
+            for _ in range(skip - 1):
+                self._cap.grab()
 
         # 다운스케일: FHD(1920×1080) 초과 시 자동으로 FHD로 축소
         # config에 "resize": [w, h] 지정 시 해당 크기로 강제 조정

@@ -33,8 +33,8 @@ class OpticalFlowDetector:
         self._pos_alpha        = float(flow_cfg.get("pos_ema_alpha", 0.3))  # centroid EMA 계수
         self._window           = flow_cfg.get("window_frames", 25)
         self._trigger          = flow_cfg.get("trigger_frames", 12)
-        self._max_box_jump     = flow_cfg.get("max_box_jump_px", 30)
-        self._reset_on_jump    = flow_cfg.get("reset_on_box_jump", True)
+        self._max_box_jump_ratio = float(flow_cfg.get("max_box_jump_ratio", 0.5))
+        self._reset_on_jump      = flow_cfg.get("reset_on_box_jump", True)
         self._reset_on_missing = flow_cfg.get("reset_on_missing_box", True)
 
         self._prev_roi_gray: np.ndarray | None = None
@@ -109,7 +109,9 @@ class OpticalFlowDetector:
         # ── 1. Box jump 감지 (raw bbox 기준 — 다른 물체로 전환 여부) ──────
         if self._prev_raw_box is not None:
             self.last_jump_px = self._box_jump_px(self._prev_raw_box, (x1, y1, x2, y2))
-            if self.last_jump_px > self._max_box_jump:
+            bbox_diag = math.hypot(x2 - x1, y2 - y1)
+            jump_triggered = bbox_diag > 0 and (self.last_jump_px / bbox_diag) > self._max_box_jump_ratio
+            if jump_triggered:
                 self.last_skipped  = True
                 self._ema_cx = self._ema_cy = None   # 다른 물체 → centroid EMA 리셋
                 new_gray = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
@@ -144,15 +146,10 @@ class OpticalFlowDetector:
         rms        = masked_rms if masked_rms is not None else float(np.sqrt(np.mean(magnitude ** 2)))
         self.last_rms = rms
 
-        # ── 5. bbox 크기로 정규화 (카메라 거리 보정) ─────────────────────
-        # 같은 물리적 움직임이라도 가까운 딸랑이는 픽셀 이동량이 크게 나옴
-        # normalized_rms = rms / sqrt(bbox_w * bbox_h) → 크기 무관한 상대적 수치
-        bbox_size = math.sqrt((x2 - x1) * (y2 - y1))
-        normalized_rms = rms / bbox_size if bbox_size > 0 else rms
-        self.last_normalized_rms = normalized_rms
-
-        # ── 6. RMS EMA 스무딩 (잔여 스파이크 억제) ───────────────────────
-        self._ema_rms          = self._rms_ema_alpha * normalized_rms + (1.0 - self._rms_ema_alpha) * self._ema_rms
+        # ── 5. RMS EMA 스무딩 (잔여 스파이크 억제) ───────────────────────
+        # bbox_size 정규화 제거: 정규화하면 큰 딸랑이일수록 RMS가 작아져 감지 역전 발생
+        self.last_normalized_rms = rms  # 호환성 유지 (raw rms 그대로)
+        self._ema_rms          = self._rms_ema_alpha * rms + (1.0 - self._rms_ema_alpha) * self._ema_rms
         self.last_smoothed_rms = self._ema_rms
 
         motion = self._ema_rms > self._rms_thr
