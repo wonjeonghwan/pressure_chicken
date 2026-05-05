@@ -178,7 +178,7 @@ class UIDisplay:
                 self.on_camera_switch()
         elif key == pygame.K_ESCAPE:
             self._selected_id = None
-        elif key == pygame.K_F2:
+        elif key == pygame.K_f:
             self.start_calibration()
         elif key == pygame.K_d:
             self.dev_mode = not self.dev_mode
@@ -469,7 +469,7 @@ class UIDisplay:
         toolbar_rect = pygame.Rect(px + 10, oy, _RIGHT_PANEL_W - 20, 64)
         pygame.draw.rect(self._screen, _C_CARD_BG, toolbar_rect, border_radius=6)
         
-        conf_btn = self._fonts["small"].render("⚙ 설정(F2)", True, _C_BRAND if not self.calibration_mode else _C_TEXT_LIGHT)
+        conf_btn = self._fonts["small"].render("⚙ 설정(F)", True, _C_BRAND if not self.calibration_mode else _C_TEXT_LIGHT)
         mask_btn = self._fonts["small"].render(f"Mask(M): {'ON' if self.show_mask else 'OFF'}", True, _C_BRAND if self.show_mask else _C_TEXT_LIGHT)
         cam_btn = self._fonts["small"].render("카메라 전환(C)", True, _C_TEXT_LIGHT)
         dev_btn = self._fonts["small"].render(f"Dev(D): {'ON' if getattr(self, 'dev_mode', False) else 'OFF'}", True, _C_BRAND if getattr(self, 'dev_mode', False) else _C_TEXT_LIGHT)

@@ -115,12 +115,12 @@ Phase 2: OpticalFlowDetector (core/optical_flow.py)
 | `M` | 세그멘테이션 마스크 오버레이 토글 |
 | `C` | 카메라 전환 |
 | `Space` | 비디오 일시정지 / 재생 (파일 소스 시) |
-| `F2` | 인앱 캘리브레이션 모드 진입 (드래그로 ROI 설정) |
-| `F2` 모드에서 `Enter` | ROI 저장 후 캘리브레이션 종료 |
-| `F2` 모드에서 `Z` | 마지막 ROI 취소 |
-| `F2` 모드에서 `Esc` | 캘리브레이션 취소 (저장 안 함) |
+| `F` | 인앱 캘리브레이션 모드 진입 (드래그로 ROI 설정) |
+| `F` 모드에서 `Enter` | ROI 저장 후 캘리브레이션 종료 |
+| `F` 모드에서 `Z` | 마지막 ROI 취소 |
+| `F` 모드에서 `Esc` | 캘리브레이션 취소 (저장 안 함) |
 
-> **캘리브레이션**: 별도 `calibration.py` 스크립트 없이 F2 키로 메인 UI 내에서 바로 실행.
+> **캘리브레이션**: 별도 `calibration.py` 스크립트 없이 F 키로 메인 UI 내에서 바로 실행.
 
 ---
 
@@ -181,7 +181,7 @@ uv run python diag_rms.py --frames 300
 uv run python diag_rms.py --burner 3 --frames 150 --skip 30
 ```
 
-> **캘리브레이션**: 실행 후 F2 키 → 영상에서 마우스 드래그로 화구 ROI 지정 → Enter 저장.
+> **캘리브레이션**: 실행 후 F 키 → 영상에서 마우스 드래그로 화구 ROI 지정 → Enter 저장.
 > `--calibrate` CLI 플래그는 제거됨 (2026-05-05).
 
 ### pyproject.toml
