@@ -29,7 +29,6 @@ from core.detector import BurnerDetector, CLASS_POT_BODY, CLASS_POT_WEIGHT
 from core.state_machine import BurnerRegistry, BurnerState
 from core.stabilizer import Stabilizer
 from core.optical_flow import OpticalFlowDetector
-from core.frequency_filter import FrequencyAnalyzer
 
 
 class FrameProcessor:
@@ -52,7 +51,6 @@ class FrameProcessor:
 
         stab_cfg = config.get("stabilizer", {})
         flow_cfg = config.get("optical_flow", {})
-        freq_cfg = config.get("frequency", {})
 
         # Phase 1: 소스별 Stabilizer
         self._stabilizers: dict[int, Stabilizer] = {
@@ -66,18 +64,7 @@ class FrameProcessor:
             for b in burner_cfgs
         }
 
-        # Phase 3: 화구별 FrequencyAnalyzer (딸랑이 마스크 픽셀 진동 주파수 분석)
-        self._freq_enabled = freq_cfg.get("enabled", False)
-        fps = 15.0
-        for src in sources.values():
-            f = src.fps
-            if f and f > 0:
-                fps = f
-                break
-        self._freq: dict[int, FrequencyAnalyzer] = {
-            b["id"]: FrequencyAnalyzer(freq_cfg, fps=fps)
-            for b in burner_cfgs
-        }
+
 
         # 화구별 캘리브레이션 앵커 포인트
         self._anchors: dict[int, tuple[int, int]] = {}
@@ -117,7 +104,6 @@ class FrameProcessor:
             bsm = self._registry.get(bid)
             if bsm.state == BurnerState.EMPTY and self._prev_states[bid] != BurnerState.EMPTY:
                 self._oflow[bid].reset()
-                self._freq[bid].reset()
                 self._prev_states[bid] = BurnerState.EMPTY
                 self.last_matched_boxes.pop(bid, None)
                 self.last_weight_boxes.pop(bid, None)
@@ -253,15 +239,8 @@ class FrameProcessor:
                     oflow_mask = mask_xy  if has_wt else None
                     vibrating_p2, _ = self._oflow[bid].update(stabilized, oflow_box, oflow_mask)
 
-                    # Phase 3: 마스크 픽셀 수평 이동 주파수 분석
-                    masked_flow_x = self._oflow[bid].last_masked_flow_x
-                    freq_motion, _ = self._freq[bid].update(masked_flow_x)
-
-                    # 최종 진동 판정: Phase3 활성화 + 마스크 신호 있으면 AND 조건, 아니면 Phase2만
-                    if self._freq_enabled and masked_flow_x is not None:
-                        vibrating = vibrating_p2 and freq_motion
-                    else:
-                        vibrating = vibrating_p2
+                    # 최종 진동 판정 (Phase 2 단독 수행)
+                    vibrating = vibrating_p2
 
                     detections[bid] = (True, vibrating)
 
@@ -270,7 +249,7 @@ class FrameProcessor:
                     bsm.vibration_score = self._oflow[bid].score
                     # current_angle 에 smoothed RMS 저장 (UI 표시용)
                     bsm.current_angle   = self._oflow[bid].last_smoothed_rms if has_wt else None
-                    bsm.angle_deviation = self._freq[bid].last_amplitude if self._freq_enabled else self._oflow[bid].last_normalized_rms
+                    bsm.angle_deviation = self._oflow[bid].last_normalized_rms
 
                 else:
                     if self._body_ttl.get(bid, 0) > 0 and bid in self.last_matched_boxes:
@@ -299,11 +278,9 @@ class FrameProcessor:
 
             if cur == BurnerState.EMPTY and prev != BurnerState.EMPTY:
                 self._oflow[bid].reset()
-                self._freq[bid].reset()
 
             elif cur == BurnerState.DONE_FIRST and prev == BurnerState.POT_STEAMING_FIRST:
                 self._oflow[bid].reset()
-                self._freq[bid].reset()
 
             self._prev_states[bid] = cur
 

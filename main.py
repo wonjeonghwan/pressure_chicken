@@ -63,7 +63,6 @@ def apply_source_overrides(config: dict, overrides: dict[int, str]) -> None:
 def run(config: dict, test_frames: int = 0) -> None:
     sources_cfg  = config["sources"]
     burners_cfg  = config.get("burners", [])
-    motion_cfg   = config.get("motion", {})
     ui_cfg       = config.get("ui", {})
     model_cfg    = config.get("model", {})
 
@@ -110,7 +109,7 @@ def run(config: dict, test_frames: int = 0) -> None:
         burner_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
 
     # 3) Detector
-    detector = BurnerDetector(weights, confidence, motion_cfg)
+    detector = BurnerDetector(weights, confidence)
 
     # 4) Processor
     processor = FrameProcessor(sources, burners_cfg, registry, detector, config)
@@ -152,24 +151,29 @@ def run(config: dict, test_frames: int = 0) -> None:
                 config=config, config_path=config.get("_path")
             )
             
+    def handle_config_reloaded(new_cfg: dict):
+        nonlocal burners_cfg, registry, processor
+        print("[main] 핫 리로드 실행: 화구 설정이 메모리에 즉각 반영됩니다.")
+        burners_cfg = new_cfg.get("burners", [])
+        
+        new_registry = BurnerRegistry()
+        new_meta = {}
+        for b in burners_cfg:
+            new_registry.add(b["id"], b.get("countdown_first", 720), b.get("countdown_second", 300))
+            new_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
+            
+        display._registry = new_registry
+        display._meta = new_meta
+        display._card_rects.clear()
+        
+        new_processor = FrameProcessor(sources, burners_cfg, new_registry, detector, config)
+        registry = new_registry
+        processor = new_processor
+
     display.on_camera_switch = trigger_camera_switch
+    display.on_config_reloaded = handle_config_reloaded
 
-    def on_calib_saved(new_burners):
-        nonlocal processor
-        config["burners"] = new_burners
-        registry.burners.clear()
-        burner_meta.clear()
-        for b in new_burners:
-            registry.add(
-                b["id"],
-                b.get("countdown_first", 720),
-                b.get("countdown_second", 300),
-            )
-            burner_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
-        # Re-init processor with new burners
-        processor = FrameProcessor(sources, new_burners, registry, detector, config)
 
-    display.on_calibration_saved = on_calib_saved
 
     try:
         while running:

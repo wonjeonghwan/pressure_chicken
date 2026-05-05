@@ -1,8 +1,8 @@
 """
 YOLO-seg 추론 래퍼
 
-모델 파일이 없으면 자동으로 OpenCV 폴백 모드로 동작하며
-model_missing = True 플래그를 설정한다.
+모델 파일이 없으면 model_missing = True 플래그를 설정하고
+detect()는 빈 리스트를 반환한다.
 
 클래스 정의:
   0: empty_burner  — 빈 화구
@@ -43,7 +43,7 @@ class Detection:
 
 class BurnerDetector:
     """
-    YOLO 기반 감지기. 모델 없으면 OpenCV 폴백.
+    YOLO 기반 감지기. 모델 없으면 빈 리스트 반환.
 
     YOLO 모델은 전체 인스턴스가 공유한다 (한 번만 로드).
     """
@@ -60,7 +60,7 @@ class BurnerDetector:
         cls._initialized = True
 
         if not os.path.exists(weights_path):
-            print(f"[Detector] 모델 없음: '{weights_path}' → OpenCV 폴백 모드")
+            print(f"[Detector] 모델 없음: '{weights_path}' → 빈 리스트 반환 모드")
             cls._model_missing = True
             return
 
@@ -74,21 +74,14 @@ class BurnerDetector:
             cls._use_half = torch.cuda.is_available()
             print(f"[Detector] YOLO 모델 로드 완료: {weights_path}  (half={cls._use_half})")
         except Exception as e:
-            print(f"[Detector] 로드 실패 ({e}) → OpenCV 폴백 모드")
+            print(f"[Detector] 로드 실패 ({e}) → 빈 리스트 반환 모드")
             cls._model_missing = True
 
-    def __init__(self, weights_path: str, confidence: float = 0.5, motion_cfg: dict | None = None):
+    def __init__(self, weights_path: str, confidence: float = 0.5):
         BurnerDetector._init_model(weights_path, confidence)
         self._confidence = confidence
-        cfg = motion_cfg or {}
 
-        # OpenCV 폴백용
-        self._fgbg       = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
-        self._prev_gray: np.ndarray | None = None
-        self._lr         = cfg.get("learning_rate",    0.005)
-        self._thresh     = cfg.get("threshold",        15)
-        self._mot_ratio  = cfg.get("min_motion_ratio", 0.05)
-        self._pot_ratio  = cfg.get("pot_ratio",        0.3)
+
 
     # ── 공개 API ───────────────────────────────────────────────────────
 
@@ -150,31 +143,3 @@ class BurnerDetector:
                 out[i].append(Detection(cls_id, conf, x1, y1, x2, y2, keypoints=kps, mask_xy=mask_xy))
         return out
 
-    def detect_opencv(self, roi_frame: np.ndarray) -> tuple[bool, bool]:
-        """
-        OpenCV 폴백 감지.
-        Returns: (pot_present, motion_detected)
-        """
-        if roi_frame is None or roi_frame.size == 0:
-            return False, False
-
-        roi_area = roi_frame.shape[0] * roi_frame.shape[1]
-
-        # 밥솥 유무 — MOG2
-        fgmask = self._fgbg.apply(roi_frame, learningRate=self._lr)
-        pot_present = int(np.sum(fgmask > 200)) > int(roi_area * self._pot_ratio)
-
-        # 움직임 — 프레임 diff
-        gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
-        motion = False
-        if self._prev_gray is not None and self._prev_gray.shape == gray.shape:
-            diff   = cv2.absdiff(self._prev_gray, gray)
-            motion = int(np.sum(diff > self._thresh)) > int(roi_area * self._mot_ratio)
-        self._prev_gray = gray
-
-        return pot_present, motion
-
-    def reset_opencv(self) -> None:
-        """ROI 변경 등으로 배경 모델을 초기화할 때 사용"""
-        self._fgbg     = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
-        self._prev_gray = None

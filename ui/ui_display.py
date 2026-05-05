@@ -82,6 +82,7 @@ class UIDisplay:
 
         # 외부 콜백
         self.on_camera_switch = None
+        self.on_config_reloaded = None
 
     def init(self) -> None:
         pygame.init()
@@ -118,8 +119,8 @@ class UIDisplay:
         print(f"[UI] 캘리브레이션 저장 완료 ({len(self._calib_burners)}개 화구)")
         
         # 콜백이 있다면 즉시 반영
-        if getattr(self, "on_calibration_saved", None):
-            self.on_calibration_saved(self._calib_burners)
+        if getattr(self, "on_config_reloaded", None):
+            self.on_config_reloaded(self.config_data)
         else:
             print("[UI] 변경된 설정은 다음 실행 혹은 내부 레지스트리 재등록 후 적용됩니다.")
 

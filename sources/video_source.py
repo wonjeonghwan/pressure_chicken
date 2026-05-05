@@ -32,8 +32,12 @@ class VideoSource:
                 fallback = self._cfg.get("fallback_index", 0)
                 self._cap = cv2.VideoCapture(fallback)
         else:
+            import sys
             index = self._cfg.get("index", 0)
-            self._cap = cv2.VideoCapture(index)
+            if sys.platform == "win32":
+                self._cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+            else:
+                self._cap = cv2.VideoCapture(index)
 
         if not self._cap.isOpened():
             print(f"[VideoSource] 경고: 소스 열기 실패 ({self._cfg}). 빈 프레임으로 동작합니다.")
@@ -124,9 +128,13 @@ class VideoSource:
     @staticmethod
     def find_available_cameras(max_try: int = 10) -> list[int]:
         """사용 가능한 카메라 인덱스 목록을 반환."""
+        import sys
         available = []
         for i in range(max_try):
-            cap = cv2.VideoCapture(i)
+            if sys.platform == "win32":
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            else:
+                cap = cv2.VideoCapture(i)
             if cap is not None and cap.isOpened():
                 available.append(i)
                 cap.release()

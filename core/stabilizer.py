@@ -1,10 +1,10 @@
 """
-영상 안정화 모듈 (Phase 1 - Grid 방식)
+영상 안정화 모듈 (Phase 1)
 
 [설계 원칙]
-  - Shi-Tomasi 대신 균등 격자(Grid) 특징점 사용
-    → 텍스처 편향 없음. 화면 전체에 고르게 분포.
-    → 사람/사물이 일부 가려도 나머지 격자로 보정 유지.
+  - goodFeaturesToTrack(Shi-Tomasi 코너) 로 추적 가능한 특징점 동적 선별
+    → 텍스처 없는 밋밋한 영역 배제, LK 추적 정확도 향상.
+    → 특징점이 부족한 화면(min_inliers 미만) 에서는 균등 Grid 로 폴백.
 
   - 누적 변환(cumulative) 대신 프레임 간(frame-to-frame) 보정
     → 오차 누적(drift) 없음.
@@ -90,10 +90,10 @@ class Stabilizer:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = frame.shape[:2]
 
-        # 첫 프레임: 격자점 생성 후 기준 저장
+        # 첫 프레임: 특징점 생성 후 기준 저장
         if self._prev_gray is None:
             self._prev_gray = gray
-            self._prev_pts  = self._make_grid(h, w)
+            self._prev_pts  = self._detect_features(gray)
             return frame
 
         # ── Step 1: LK 광학흐름으로 격자점 추적 ──────────────────────────
@@ -106,9 +106,9 @@ class Stabilizer:
         self.last_n_features = len(good_prev)
 
         if len(good_prev) < self._min_inliers:
-            # 추적 실패 → 격자 재생성, 보정 없이 반환
+            # 추적 실패 → 특징점 재생성, 보정 없이 반환
             self._prev_gray = gray
-            self._prev_pts  = self._make_grid(h, w)
+            self._prev_pts  = self._detect_features(gray)
             return frame
 
         # ── Step 2: RANSAC — 배경 인라이어(공통 이동) 선별 ───────────────
@@ -121,7 +121,7 @@ class Stabilizer:
 
         if transform is None or self.last_n_inliers < self._min_inliers:
             self._prev_gray = gray
-            self._prev_pts  = self._make_grid(h, w)
+            self._prev_pts  = self._detect_features(gray)
             return frame
 
         # ── Step 3: EMA 스무딩 보정 + warpAffine ─────────────────────────
@@ -146,14 +146,29 @@ class Stabilizer:
             borderMode=cv2.BORDER_REPLICATE,
         )
 
-        # 다음 프레임 준비: raw gray 기준으로 격자 갱신
+        # 다음 프레임 준비: raw gray 기준으로 특징점 갱신
         self._prev_gray = gray
-        self._prev_pts  = self._make_grid(h, w)
+        self._prev_pts  = self._detect_features(gray)
 
         return stabilized
 
+    def _detect_features(self, gray: np.ndarray) -> np.ndarray:
+        """goodFeaturesToTrack을 사용하여 추적하기 좋은 특징점(코너) 검출. 실패 시 fallback_grid 반환"""
+        pts = cv2.goodFeaturesToTrack(
+            gray, 
+            maxCorners=100, 
+            qualityLevel=0.03, 
+            minDistance=30, 
+            blockSize=7
+        )
+        if pts is None or len(pts) < self._min_inliers:
+            # 밋밋한 화면에서 특징점이 너무 적으면 기존 Grid 방식으로 Fallback
+            h, w = gray.shape[:2]
+            return self._make_grid(h, w)
+        return pts
+
     def _make_grid(self, h: int, w: int) -> np.ndarray:
-        """화면을 grid_rows × grid_cols 균등 격자로 분할, 각 셀 중심점 반환"""
+        """화면을 grid_rows × grid_cols 균등 격자로 분할, 각 셀 중심점 반환 (Fallback 용)"""
         pts = []
         for r in range(self._grid_rows):
             for c in range(self._grid_cols):
