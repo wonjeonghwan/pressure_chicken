@@ -41,7 +41,7 @@ def compute_raw_rms(flow: np.ndarray) -> float:
 
 def compute_masked_rms(flow: np.ndarray, rx1: int, ry1: int,
                        mask_xy: np.ndarray | None) -> tuple[float | None, int]:
-    """(masked_rms or None, pixel_count)"""
+    """(masked_rms 구방식 or None, pixel_count) — 비교용으로 유지"""
     if mask_xy is None or len(mask_xy) < 3:
         return None, 0
     rh, rw = flow.shape[:2]
@@ -53,6 +53,25 @@ def compute_masked_rms(flow: np.ndarray, rx1: int, ry1: int,
         return None, px_count
     mag = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
     return float(np.sqrt(np.mean(mag[mask_img > 0] ** 2))), px_count
+
+
+def compute_deform_rms(flow: np.ndarray, rx1: int, ry1: int,
+                       mask_xy: np.ndarray | None) -> tuple[float | None, int]:
+    """(deform_rms 신방식 or None, pixel_count) — mean flow 차감 후 residual RMS"""
+    if mask_xy is None or len(mask_xy) < 3:
+        return None, 0
+    rh, rw = flow.shape[:2]
+    local_pts = (mask_xy - np.array([[rx1, ry1]], dtype=np.float32)).astype(np.int32)
+    mask_img = np.zeros((rh, rw), dtype=np.uint8)
+    cv2.fillPoly(mask_img, [local_pts], 255)
+    px_count = int(np.count_nonzero(mask_img))
+    if px_count < 10:
+        return None, px_count
+    fx = flow[..., 0][mask_img > 0]
+    fy = flow[..., 1][mask_img > 0]
+    rx = fx - np.mean(fx)
+    ry = fy - np.mean(fy)
+    return float(np.sqrt(np.mean(rx ** 2 + ry ** 2))), px_count
 
 
 def main():
@@ -84,7 +103,9 @@ def main():
         pyr_scale=0.5, levels=3, winsize=15,
         iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
     )
-    RMS_THR = config["optical_flow"]["rms_threshold"]
+    RMS_THR      = config["optical_flow"]["rms_threshold"]
+    NORMALIZE    = config["optical_flow"].get("normalize_rms", False)
+    REF_DIAG     = float(config["optical_flow"].get("normalize_ref_diag", 40.0))
 
     # 화구별 상태
     prev_grays:     dict[int, np.ndarray | None]           = {bid: None for bid in burner_ids}
@@ -96,8 +117,9 @@ def main():
         ret, frame = src.read()
         if not ret: break
 
-    print(f"\n[임계값 rms_threshold={RMS_THR}]  skip={args.skip}프레임\n")
-    header = f"{'프레임':>5}  {'화구':>4}  {'raw_rms':>8}  {'masked_rms':>10}  {'mask_px':>7}  {'centroid_d':>10}  {'판정':>8}"
+    norm_label = f"norm(÷diag×{REF_DIAG:.0f})" if NORMALIZE else "normalize=OFF"
+    print(f"\n[임계값 rms_threshold={RMS_THR}  {norm_label}]  skip={args.skip}프레임\n")
+    header = f"{'프레임':>5}  {'화구':>4}  {'bbox_d':>6}  {'raw_rms':>8}  {'deform_rms':>10}  {'norm_rms':>9}  {'mask_px':>7}  {'판정':>8}"
     print(header)
     print("-" * len(header))
 
@@ -204,23 +226,35 @@ def main():
 
             roi_gray = cv2.cvtColor(stabilized[sy1:sy2, sx1:sx2], cv2.COLOR_BGR2GRAY)
 
-            raw_rms_val   = 0.0
-            masked_rms_val = None
-            mask_px       = 0
-            verdict       = "skip"
+            raw_rms_val    = 0.0
+            deform_rms_val = None
+            norm_rms_val   = None
+            mask_px        = 0
+            verdict        = "skip"
+            bbox_d_val     = math.hypot(wx2 - wx1, wy2 - wy1)
 
             pg = prev_grays[bid]
             if pg is not None and pg.shape == roi_gray.shape:
                 flow = cv2.calcOpticalFlowFarneback(pg, roi_gray, None, **fb_params)
                 mag_full = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
                 raw_rms_val = float(np.sqrt(np.mean(mag_full ** 2)))
-                masked_rms_val, mask_px = compute_masked_rms(flow, sx1, sy1, mask_xy)
-                rms_used = masked_rms_val if masked_rms_val is not None else raw_rms_val
-                verdict = "MOTION !" if rms_used > RMS_THR else "still"
+                deform_rms_val, mask_px = compute_deform_rms(flow, sx1, sy1, mask_xy)
+                # fallback: 마스크 없으면 bbox 전체 mean 차감
+                if deform_rms_val is None:
+                    fx = flow[..., 0].ravel(); fy = flow[..., 1].ravel()
+                    rx = fx - np.mean(fx);     ry = fy - np.mean(fy)
+                    deform_rms_val = float(np.sqrt(np.mean(rx ** 2 + ry ** 2)))
+                if NORMALIZE and bbox_d_val > 0:
+                    norm_rms_val = deform_rms_val * REF_DIAG / bbox_d_val
+                else:
+                    norm_rms_val = deform_rms_val
+                cmp_val = norm_rms_val if NORMALIZE else deform_rms_val
+                verdict = "MOTION !" if cmp_val > RMS_THR else "still"
 
-            mrms_str = f"{masked_rms_val:.3f}" if masked_rms_val is not None else "    ---"
-            print(f"{frame_n+args.skip:>5}  {bid:>4}  {raw_rms_val:>8.3f}  {mrms_str:>10}  "
-                  f"{mask_px:>7}  {centroid_d:>10.2f}  {verdict}")
+            deform_str = f"{deform_rms_val:.3f}" if deform_rms_val is not None else "       ---"
+            norm_str   = f"{norm_rms_val:.3f}"   if norm_rms_val   is not None else "      ---"
+            print(f"{frame_n+args.skip:>5}  {bid:>4}  {bbox_d_val:>6.1f}  {raw_rms_val:>8.3f}  "
+                  f"{deform_str:>10}  {norm_str:>9}  {mask_px:>7}  {verdict}")
 
             prev_grays[bid]      = roi_gray
             prev_centroids[bid]  = (ema_cx, ema_cy)

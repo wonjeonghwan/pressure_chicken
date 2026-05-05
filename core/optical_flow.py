@@ -31,11 +31,14 @@ class OpticalFlowDetector:
         self._rms_thr          = flow_cfg.get("rms_threshold", 0.5)
         self._rms_ema_alpha    = float(flow_cfg.get("rms_ema_alpha", 0.5))
         self._pos_alpha        = float(flow_cfg.get("pos_ema_alpha", 0.3))  # centroid EMA 계수
+        self._normalize_rms      = bool(flow_cfg.get("normalize_rms", False))
+        self._normalize_ref_diag = float(flow_cfg.get("normalize_ref_diag", 40.0))
         self._window           = flow_cfg.get("window_frames", 25)
         self._trigger          = flow_cfg.get("trigger_frames", 12)
         self._max_box_jump_ratio = float(flow_cfg.get("max_box_jump_ratio", 0.5))
         self._reset_on_jump      = flow_cfg.get("reset_on_box_jump", True)
         self._reset_on_missing = flow_cfg.get("reset_on_missing_box", True)
+        self._missing_reset_frames = int(flow_cfg.get("missing_reset_frames", 3))
 
         self._prev_roi_gray: np.ndarray | None = None
         self._prev_raw_box:  tuple[int, int, int, int] | None = None  # jump 감지 전용
@@ -43,6 +46,7 @@ class OpticalFlowDetector:
         self._ema_cy: float | None = None  # mask centroid EMA y
         self._cv_hist: deque[bool] = deque(maxlen=self._window)
         self._ema_rms: float = 0.0
+        self._missing_streak: int = 0
 
         self.last_rms:            float = 0.0
         self.last_normalized_rms: float = 0.0
@@ -61,6 +65,7 @@ class OpticalFlowDetector:
         self._ema_cy             = None
         self._cv_hist.clear()
         self._ema_rms            = 0.0
+        self._missing_streak     = 0
         self.last_rms            = 0.0
         self.last_normalized_rms = 0.0
         self.last_smoothed_rms   = 0.0
@@ -98,7 +103,10 @@ class OpticalFlowDetector:
             return False, 0.0
 
         if w_box is None:
-            self._handle_gap("missing_box", clear_history=self._reset_on_missing)
+            self._missing_streak += 1
+            # N프레임 연속 미감지일 때만 window 초기화, 그 미만은 False 추가만
+            clear = self._reset_on_missing and self._missing_streak >= self._missing_reset_frames
+            self._handle_gap("missing_box", clear_history=clear)
             return self._check(), self.last_rms
 
         x1, y1, x2, y2 = self._clip_box(frame, w_box)
@@ -106,10 +114,11 @@ class OpticalFlowDetector:
             self._handle_gap("tiny_box", clear_history=self._reset_on_missing)
             return self._check(), self.last_rms
 
+        bbox_diag = math.hypot(x2 - x1, y2 - y1)
+
         # ── 1. Box jump 감지 (raw bbox 기준 — 다른 물체로 전환 여부) ──────
         if self._prev_raw_box is not None:
             self.last_jump_px = self._box_jump_px(self._prev_raw_box, (x1, y1, x2, y2))
-            bbox_diag = math.hypot(x2 - x1, y2 - y1)
             jump_triggered = bbox_diag > 0 and (self.last_jump_px / bbox_diag) > self._max_box_jump_ratio
             if jump_triggered:
                 self.last_skipped  = True
@@ -120,7 +129,8 @@ class OpticalFlowDetector:
                 self._prev_raw_box = (x1, y1, x2, y2)
                 return self._check(), self.last_rms
 
-        self._prev_raw_box = (x1, y1, x2, y2)
+        self._prev_raw_box   = (x1, y1, x2, y2)
+        self._missing_streak = 0
 
         # ── 2. Centroid EMA → 안정된 crop 위치 계산 ─────────────────────
         #   mask 있으면: centroid EMA 갱신 후 안정된 위치로 crop
@@ -140,16 +150,31 @@ class OpticalFlowDetector:
         self.last_flow          = flow
         self.last_masked_flow_x = self._compute_masked_flow_x(flow, rx1, ry1, mask_xy)
 
-        # ── 4. RMS 계산: mask 영역 우선, 없으면 bbox 전체 fallback ────────
-        magnitude  = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
-        masked_rms = self._compute_masked_rms(magnitude, rx1, ry1, mask_xy)
-        rms        = masked_rms if masked_rms is not None else float(np.sqrt(np.mean(magnitude ** 2)))
+        # ── 4. RMS 계산: 평균 flow 차감 후 residual RMS (deformation 측정) ──
+        # mask 있으면: mask 내부 픽셀의 mean flow 차감 → 카메라 떨림/위치 이동 제거
+        # mask 없으면: bbox 전체 픽셀의 mean flow 차감 → 부분적으로 떨림 상쇄
+        masked_rms = self._compute_masked_rms(flow, rx1, ry1, mask_xy)
+        if masked_rms is None:
+            fx = flow[..., 0].ravel()
+            fy = flow[..., 1].ravel()
+            rx = fx - np.mean(fx)
+            ry = fy - np.mean(fy)
+            rms = float(np.sqrt(np.mean(rx ** 2 + ry ** 2)))
+        else:
+            rms = masked_rms
         self.last_rms = rms
 
-        # ── 5. RMS EMA 스무딩 (잔여 스파이크 억제) ───────────────────────
-        # bbox_size 정규화 제거: 정규화하면 큰 딸랑이일수록 RMS가 작아져 감지 역전 발생
-        self.last_normalized_rms = rms  # 호환성 유지 (raw rms 그대로)
-        self._ema_rms          = self._rms_ema_alpha * rms + (1.0 - self._rms_ema_alpha) * self._ema_rms
+        # ── 5. 크기 정규화 + RMS EMA 스무딩 ─────────────────────────────
+        # normalize_rms=True: norm = rms × ref_diag / bbox_diag
+        #   - bbox가 클수록(해상도↑, 카메라 가까움) 나눠서 줄이고 ref_diag로 다시 곱해
+        #     스케일을 유지하므로 threshold 값을 그대로 사용 가능 (상쇄 없음)
+        #   - 서로 다른 해상도·줌 환경에서도 threshold 불변
+        if self._normalize_rms and bbox_diag > 0:
+            norm_rms = rms * self._normalize_ref_diag / bbox_diag
+        else:
+            norm_rms = rms
+        self.last_normalized_rms = norm_rms
+        self._ema_rms          = self._rms_ema_alpha * norm_rms + (1.0 - self._rms_ema_alpha) * self._ema_rms
         self.last_smoothed_rms = self._ema_rms
 
         motion = self._ema_rms > self._rms_thr
@@ -227,24 +252,31 @@ class OpticalFlowDetector:
 
     @staticmethod
     def _compute_masked_rms(
-        magnitude: np.ndarray,
+        flow: np.ndarray,
         roi_x1: int,
         roi_y1: int,
         mask_xy: np.ndarray | None,
     ) -> float | None:
-        """segmentation 폴리곤 내부 픽셀만으로 RMS 계산.
+        """mask 내부 픽셀의 평균 flow를 차감한 뒤 residual RMS 반환 (deformation RMS).
+
+        평균 flow = 카메라 떨림 + 딸랑이 위치 이동의 합산값.
+        차감 후 residual = 순수 형상 변화(진동)만 남음.
         mask 없거나 유효 픽셀 10개 미만이면 None 반환 → 호출자가 fallback 처리.
         """
         if mask_xy is None or len(mask_xy) < 3:
             return None
-        rh, rw = magnitude.shape[:2]
+        rh, rw = flow.shape[:2]
         local_pts = (mask_xy - np.array([[roi_x1, roi_y1]], dtype=np.float32)).astype(np.int32)
         mask_img = np.zeros((rh, rw), dtype=np.uint8)
         cv2.fillPoly(mask_img, [local_pts], 255)
         pixel_count = int(np.count_nonzero(mask_img))
         if pixel_count < 10:
             return None
-        return float(np.sqrt(np.mean(magnitude[mask_img > 0] ** 2)))
+        fx = flow[..., 0][mask_img > 0]
+        fy = flow[..., 1][mask_img > 0]
+        rx = fx - np.mean(fx)
+        ry = fy - np.mean(fy)
+        return float(np.sqrt(np.mean(rx ** 2 + ry ** 2)))
 
     @staticmethod
     def _compute_masked_flow_x(
