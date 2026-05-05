@@ -73,6 +73,8 @@ Phase 2: OpticalFlowDetector (core/optical_flow.py)
   - Farneback dense flow
   - crop 위치: bbox center EMA (pos_alpha=0.3) — mask 유무 무관하게 항상 bbox center 기준
   - RMS 계산: mask_xy 폴리곤 내부 픽셀만 (mask 없는 프레임은 bbox 전체 fallback)
+  - 크기 정규화: norm_rms = raw_rms × ref_diag / bbox_diag  (normalize_rms=true 시)
+    → 해상도·줌 변화에 무관하게 threshold 동일 적용 가능. ref_diag=40px 기준.
   - RMS EMA 스무딩 (alpha=0.35) + window 투표 (25프레임, 14개 이상 → STEAMING)
   ↓
 상태머신 갱신 (core/state_machine.py)
@@ -84,17 +86,21 @@ Phase 2: OpticalFlowDetector (core/optical_flow.py)
 
 ## 수동 조작 UI
 
-### 화면 레이아웃
+### 화면 레이아웃 (2026-05-05 재설계)
 
 ```
-┌─────────────────────────────────────────────────┐
-│           압력밥솥 타이머 모니터                  │
-├──────────┬──────────┬──────────┬──────────────── │
-│   1번    │   2번    │   3번    │   ...           │
-│  3:42    │  대기    │  완료!   │                 │
-│  ⟳  ▶  │  ⟳  ▶  │  ⟳  ▶  │                 │
-└──────────┴──────────┴──────────┴─────────────────┘
-[선택: 1번 화구]  R: 초기화   S: 수동시작   ESC: 선택해제
+┌──────────────────────────────────────┬──────────────────────┐
+│  카메라 영상 오버레이                  │  길가옆에 압력밥솥    │
+│  (YOLO bbox, mask, RMS 수치 표시)     │  타이머 (우측 패널)   │
+│                                      │  ─────────────────── │
+│                                      │  ⚙설정  Mask  카메라  │
+│                                      │  ─────────────────── │
+│                                      │  ┌──────┐ ┌──────┐  │
+│                                      │  │ 1번  │ │ 2번  │  │
+│                                      │  │ 3:42 │ │ 대기 │  │
+│                                      │  │ ⟳ ▶ │ │ ⟳ ▶ │  │
+│                                      │  └──────┘ └──────┘  │
+└──────────────────────────────────────┴──────────────────────┘
 ```
 
 ### 키/버튼 동작
@@ -108,6 +114,13 @@ Phase 2: OpticalFlowDetector (core/optical_flow.py)
 | `1`~`9`, `0` | 1번~10번 화구 선택 |
 | `M` | 세그멘테이션 마스크 오버레이 토글 |
 | `C` | 카메라 전환 |
+| `Space` | 비디오 일시정지 / 재생 (파일 소스 시) |
+| `F2` | 인앱 캘리브레이션 모드 진입 (드래그로 ROI 설정) |
+| `F2` 모드에서 `Enter` | ROI 저장 후 캘리브레이션 종료 |
+| `F2` 모드에서 `Z` | 마지막 ROI 취소 |
+| `F2` 모드에서 `Esc` | 캘리브레이션 취소 (저장 안 함) |
+
+> **캘리브레이션**: 별도 `calibration.py` 스크립트 없이 F2 키로 메인 UI 내에서 바로 실행.
 
 ---
 
@@ -136,7 +149,7 @@ pressure_timer/
 │   ├── video_source.py          # 카메라/파일 입력 추상화
 │   └── camera_utils.py          # 카메라 전환 유틸
 ├── ui/
-│   └── ui_display.py            # pygame UI (수동 조작 포함)
+│   └── ui_display.py            # pygame UI (단일 통합 대시보드 — 영상 오버레이 + 인앱 캘리브레이션 포함)
 ├── tests/
 │   └── compare_phase3.py        # Phase 3 시각 비교 뷰어
 ├── models/
@@ -157,18 +170,19 @@ pressure_timer/
 # 기본 실행 (카메라)
 uv run python main.py
 
-# 내부 영상으로 캘리브레이션
-uv run python main.py --source-0 raw/Side_01.mov --calibrate
-
 # 내부 영상으로 실행
 uv run python main.py --source-0 raw/Side_01.mov
 
 # config 지정
 uv run python main.py --config config/store_001.json
 
-# N프레임 후 자동 종료 (테스트용)
-uv run python main.py --test 60
+# RMS 진단 (정지 노이즈 확인 / threshold 튜닝)
+uv run python diag_rms.py --frames 300
+uv run python diag_rms.py --burner 3 --frames 150 --skip 30
 ```
+
+> **캘리브레이션**: 실행 후 F2 키 → 영상에서 마우스 드래그로 화구 ROI 지정 → Enter 저장.
+> `--calibrate` CLI 플래그는 제거됨 (2026-05-05).
 
 ### pyproject.toml
 

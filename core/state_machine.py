@@ -38,9 +38,9 @@ _STEAMING = (BurnerState.POT_STEAMING_FIRST, BurnerState.POT_STEAMING_SECOND)
 
 STATE_COLORS = {
     BurnerState.EMPTY:               (80,  80,  80),
-    BurnerState.POT_IDLE:            (50, 120, 200),
+    BurnerState.POT_IDLE:            (255, 192,  0),   # 브랜드 옐로우
     BurnerState.POT_STEAMING_FIRST:  (60, 180,  60),
-    BurnerState.DONE_FIRST:          (200, 160,  20),
+    BurnerState.DONE_FIRST:          (255, 140,  0),   # 오렌지
     BurnerState.POT_STEAMING_SECOND: (30,  130,  30),
     BurnerState.DONE_SECOND:         (220,  40,  40),
 }

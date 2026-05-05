@@ -1,6 +1,6 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-04-19 (RMS 정규화 도입, threshold 스케일 변경) | 현재 단계: Phase 2 완료 → 현장 라이브 테스트 대기
+> 최종 업데이트: 2026-05-05 (UI 전면 재설계, RMS 정규화 방식 확정) | 현재 단계: Phase 2 완료 → 현장 라이브 테스트 대기
 
 ---
 
@@ -27,13 +27,18 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 **현재 파라미터 (store_config.json):**
 ```json
 "optical_flow": {
-  "rms_threshold": 0.05,
+  "rms_threshold": 0.20,
   "rms_ema_alpha": 0.35,
   "window_frames": 25,
-  "trigger_frames": 14
+  "trigger_frames": 14,
+  "normalize_rms": true,
+  "normalize_ref_diag": 40.0
 }
 ```
-※ `rms_threshold` 단위 변경: 절대 픽셀값(구) → `normalized_rms = rms / sqrt(bbox_w×bbox_h)` 비율(현재). 조정 중.
+`rms_threshold` 단위: `norm_rms = raw_rms × ref_diag / bbox_diag` 기준 비율.
+- 정지 딸랑이 noise floor: norm_rms ≈ 0.015~0.13 (p99 ≈ 0.32)
+- threshold 0.20 = noise p90(0.19) 바로 위, window 투표(14/25)로 FP 추가 차단
+- `normalize_ref_diag=40.0`: 현재 영상 기준 평균 딸랑이 bbox 대각선(~37px) 기준. 해상도·줌 변경 시 이 값 재측정.
 
 ---
 
@@ -110,8 +115,13 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 | 2026-04-12 | models/pot_seg.pt | **재학습 완료** — 87 epoch (best: 71), mAP50(B) 75.4%→85.0%, mAP50(M) 70.8%→81.0% |
 | 2026-04-19 | core/optical_flow.py | **bbox → mask_xy 기반으로 전환 (확정)** — ① crop 위치: bbox 중심 EMA (`pos_alpha=0.3`) — mask 유무와 무관하게 항상 bbox center 사용 (mask centroid EMA는 mask 없는 프레임마다 bbox center로 끌려 oscillation 발생 → FP 폭증 원인, 즉시 폐기), ② RMS 계산: mask 폴리곤 내부 픽셀만. mask 없는 프레임은 bbox 전체 RMS fallback. 진단 결과: 80프레임 3개 스파이크만 발생(window 14 미달 → STEAMING 전환 없음), FP 해결 확인. |
 | 2026-04-19 | main.py, sources/video_source.py | **영상 파일 재생 fps 동기화 구현** — 파일 소스 사용 시 `round(video_fps / target_fps)` 만큼 프레임 스킵. 실시간 카메라와 동일한 시간축 유지 목적. window_frames, EMA 등 파라미터가 실제 환경과 동일하게 적용됨. |
-| 2026-04-19 | core/optical_flow.py | **RMS 정규화 도입 (bbox 크기 기준)** — `normalized_rms = rms / sqrt(bbox_w × bbox_h)`. 카메라와 가까운 딸랑이(Pot3)가 같은 정지 상태에서도 절대 RMS가 높게 나와 FP 발생. 정규화로 모든 화구에 동일한 상대적 기준(bbox 기하평균의 %) 적용. `rms_threshold` 의미 변경: 절대 픽셀값 → bbox 크기 대비 비율. |
-| 2026-04-19 | config/store_config.json | **rms_threshold 스케일 변경** — 0.5(절대px) → 0.05(정규화 비율, 조정 중). 정규화 후 정지 RMS ≈ 0.001~0.004, 진동 RMS ≈ 0.018~0.025 예상. |
+| 2026-04-19 | core/optical_flow.py | **RMS 정규화 도입 (bbox 크기 기준) — 초안** — `normalized_rms = rms / sqrt(bbox_w × bbox_h)`. 카메라와 가까운 딸랑이가 같은 정지 상태에서도 절대 RMS가 높게 나와 FP 발생. → 2026-05-05에 방식 변경됨. |
+| 2026-04-19 | config/store_config.json | **rms_threshold 스케일 변경** — 0.5(절대px) → 조정 중. → 2026-05-05에 0.20으로 확정. |
+| 2026-05-05 | ui/ui_display.py | **UI 전면 재설계** — 브랜드 테마 도입("길가옆에 누룽지 삼계탕", 옐로우/블랙). ① 우측 패널(400px): 브랜드 헤더 + 화구 카드 목록 + 단축키 버튼. ② 인앱 캘리브레이션(F2): 드래그로 ROI 직접 그리기, ENTER 저장, Z 취소 → 별도 `calibration.py` 실행 불필요. ③ 카메라 영상 오버레이: YOLO bbox/mask/RMS 수치 같은 창에 표시. ④ 비디오 일시정지(Space), Mask 토글(M), 카메라 전환(C) 단일 UI 내 통합. |
+| 2026-05-05 | main.py | **단일 UIDisplay 통합, cv2 창 제거** — 기존 `draw_preview()` cv2 창 + pygame 이중 구조 폐기. UIDisplay 단일 창에서 영상 오버레이까지 처리. `--calibrate` CLI 플래그 제거(→ F2 키로 대체). `--test` 플래그 제거. `numpy` 직접 사용 제거. |
+| 2026-05-05 | core/optical_flow.py | **RMS 정규화 방식 확정** — `norm_rms = raw_rms × ref_diag / bbox_diag`. 이전 방식(`/sqrt(w×h)`) 대비: ① 스케일 유지 — ref_diag로 다시 곱해 값이 0으로 수렴(상쇄)하지 않음. ② threshold 불변 — bbox 크기가 바뀌어도 0.20 그대로 사용. ③ 해상도/줌 독립 — 해상도 2배 → bbox 2배 → scale 0.5 → 보정됨. `bbox_diag` 계산을 jump 감지 블록 밖으로 이동해 항상 사용 가능하게 함. |
+| 2026-05-05 | diag_rms.py | **bbox_d, norm_rms 컬럼 추가** — 화구별 실제 bbox 대각선과 정규화 후 RMS를 나란히 표시. 판정 기준도 normalize 설정에 따라 deform_rms ↔ norm_rms 자동 전환. old_rms 컬럼 제거. |
+| 2026-05-05 | config/store_config.json | **rms_threshold 0.20 확정, normalize 옵션 추가** — 500프레임 정지 영상 분석 결과: noise p90=0.19. threshold 0.20 채택. `normalize_rms: true`, `normalize_ref_diag: 40.0` 추가. 이전 threshold 0.6은 정지 noise 최댓값(0.59)과 거의 같아 실질적으로 감지 불가였음. |
 
 ---
 

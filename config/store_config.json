@@ -4,10 +4,11 @@
   "sources": [
     {
       "id": 0,
-      "type": "file",
+      "type": "camera",
       "index": 0,
       "exposure": -5,
-      "path": "raw/Top/Sample01.mp4"
+      "path": "raw/Side_02.mov",
+      "_skip_frames": 2
     }
   ],
   "ui": {
@@ -65,15 +66,11 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
-      "grid_pos": [
-        0,
-        0
-      ],
       "roi": [
-        3,
-        632,
-        303,
-        204
+        16,
+        280,
+        392,
+        316
       ]
     },
     {
@@ -81,15 +78,47 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
-      "grid_pos": [
-        0,
-        1
-      ],
       "roi": [
-        141,
-        774,
-        312,
-        219
+        235,
+        61,
+        335,
+        277
+      ]
+    },
+    {
+      "id": 3,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "roi": [
+        397,
+        292,
+        279,
+        275
+      ]
+    },
+    {
+      "id": 4,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "roi": [
+        864,
+        210,
+        128,
+        168
+      ]
+    },
+    {
+      "id": 5,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "roi": [
+        807,
+        337,
+        147,
+        172
       ]
     }
   ],
