@@ -7,7 +7,7 @@
       "type": "camera",
       "index": 0,
       "exposure": -5,
-      "path": "raw/Side_02.mov",
+      "path": "raw/0420.mov",
       "_skip_frames": 2
     }
   ],
@@ -38,11 +38,11 @@
     "farneback_poly_n": 5,
     "farneback_poly_sigma": 1.2,
     "rms_threshold": 0.2,
-    "rms_ema_alpha": 0.35,
+    "rms_ema_alpha": 0.5,
     "pos_ema_alpha": 0.3,
     "max_box_jump_ratio": 0.5,
-    "window_frames": 25,
-    "trigger_frames": 14,
+    "window_frames": 10,
+    "trigger_frames": 8,
     "reset_on_missing_box": false,
     "normalize_rms": true,
     "normalize_ref_diag": 40.0
@@ -67,10 +67,10 @@
       "countdown_first": 720,
       "countdown_second": 300,
       "roi": [
-        16,
-        280,
-        392,
-        316
+        233,
+        386,
+        635,
+        512
       ]
     },
     {
@@ -79,10 +79,10 @@
       "countdown_first": 720,
       "countdown_second": 300,
       "roi": [
-        235,
-        61,
-        335,
-        277
+        536,
+        56,
+        530,
+        426
       ]
     },
     {
@@ -91,10 +91,10 @@
       "countdown_first": 720,
       "countdown_second": 300,
       "roi": [
-        397,
-        292,
-        279,
-        275
+        831,
+        421,
+        427,
+        421
       ]
     },
     {
@@ -103,10 +103,10 @@
       "countdown_first": 720,
       "countdown_second": 300,
       "roi": [
-        864,
-        210,
-        128,
-        168
+        1027,
+        150,
+        338,
+        330
       ]
     },
     {
@@ -115,10 +115,22 @@
       "countdown_first": 720,
       "countdown_second": 300,
       "roi": [
-        807,
-        337,
-        147,
-        172
+        1208,
+        423,
+        290,
+        307
+      ]
+    },
+    {
+      "id": 6,
+      "source_id": 0,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "roi": [
+        1322,
+        217,
+        228,
+        258
       ]
     }
   ],

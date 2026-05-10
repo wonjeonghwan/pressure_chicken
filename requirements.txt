@@ -1,5 +1,7 @@
 ultralytics>=8.0.0
-opencv-python>=4.8.0
+# macOS: headless로 pygame과의 SDL2 충돌 방지 / Windows·Linux: full 버전
+opencv-python-headless>=4.8.0; sys_platform == "darwin"
+opencv-python>=4.8.0; sys_platform != "darwin"
 pygame>=2.5.0
 numpy>=1.24.0
 
