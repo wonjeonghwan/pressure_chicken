@@ -66,6 +66,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         233,
         386,
@@ -78,6 +80,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         536,
         56,
@@ -90,6 +94,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         831,
         421,
@@ -102,6 +108,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         1027,
         150,
@@ -114,6 +122,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         1208,
         423,
@@ -126,6 +136,8 @@
       "source_id": 0,
       "countdown_first": 720,
       "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
       "roi": [
         1322,
         217,

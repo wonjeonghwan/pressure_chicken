@@ -543,7 +543,7 @@ class UIDisplay:
         font = self._fonts["timer"] if bsm.state in _STEAMING else self._fonts["label"]
         color = (255, 255, 255)
         # 만약 조리완료면 붉게/깜박이게
-        if bsm.state in (BurnerState.DONE_FIRST, BurnerState.DONE_SECOND):
+        if bsm.state == BurnerState.DONE_SECOND:
             color = _C_WARNING_BG if (int(time.time() * 2) % 2 == 0) else _C_TEXT_LIGHT
         
         time_surf = font.render(bsm.status_label, True, color)
@@ -553,7 +553,8 @@ class UIDisplay:
         from core.state_machine import BurnerState as BS
         if bsm.state in (BS.EMPTY, BS.POT_IDLE): start_label = "조작"
         elif bsm.state == BS.POT_STEAMING_FIRST: start_label = "완료"
-        elif bsm.state == BS.DONE_FIRST: start_label = "재벌"
+        elif bsm.state == BS.DONE_FIRST: start_label = "건너뜀"
+        elif bsm.state == BS.WAIT_SECOND: start_label = "재벌"
         elif bsm.state == BS.POT_STEAMING_SECOND: start_label = "완료"
         else: start_label = "시작"
 

@@ -1,23 +1,25 @@
 """
 화구별 상태머신 및 타이머 관리
 
-상태 (6개):
+상태 (7개):
   EMPTY               → 빈 화구 (회색)
-  POT_IDLE            → 밥솥 감지, 딸랑이 정지 (파란색)
+  POT_IDLE            → 밥솥 감지, 대기 중 (노란색)
   POT_STEAMING_FIRST  → 초벌 타이머 진행 중 (초록색)   ← 타이머 잠금
-  DONE_FIRST          → 초벌 완료, 재벌 대기 (노란색)
+  DONE_FIRST          → 초벌 완료 냉각 중 (오렌지)      ← 진동 감지 없음, N분 후 자동 전환
+  WAIT_SECOND         → 재벌 대기 (파란색)              ← 진동 감지 재활성
   POT_STEAMING_SECOND → 재벌 타이머 진행 중 (진초록)   ← 타이머 잠금
-  DONE_SECOND         → 재벌 완료, 경보 (빨간색 점멸)
+  DONE_SECOND         → 재벌 완료, 경보 (빨간색 점멸)  ← 최종 상태, pot 이탈 시만 EMPTY
 
 전환 규칙:
-  EMPTY → POT_IDLE             : pot_body 감지
-  POT_IDLE → STEAMING_FIRST    : 딸랑이 진동 확정
-  STEAMING_FIRST → DONE_FIRST  : 초벌 타이머 완료
-  DONE_FIRST → STEAMING_SECOND : 딸랑이 재감지 (재벌 시작)
-  STEAMING_SECOND → DONE_SECOND: 재벌 타이머 완료
-
-  어느 상태든 + 밥솥 이탈 → EMPTY
-  STEAMING 중 → 진동 자동 전환 없음 (잠금), 밥솥 이탈만 예외
+  EMPTY → POT_IDLE              : pot_body 감지
+  POT_IDLE → STEAMING_FIRST     : 딸랑이 진동 확정
+  STEAMING_FIRST → DONE_FIRST   : 초벌 타이머 완료
+  DONE_FIRST → WAIT_SECOND      : done_first_timeout 경과 + pot 존재
+  DONE_FIRST → EMPTY            : pot 이탈
+  WAIT_SECOND → STEAMING_SECOND : 딸랑이 진동 확정
+  WAIT_SECOND → EMPTY           : pot 이탈
+  STEAMING_SECOND → DONE_SECOND : 재벌 타이머 완료
+  DONE_SECOND → EMPTY           : pot 이탈 (최종 상태)
 """
 
 from enum import Enum, auto
@@ -29,6 +31,7 @@ class BurnerState(Enum):
     POT_IDLE            = auto()
     POT_STEAMING_FIRST  = auto()
     DONE_FIRST          = auto()
+    WAIT_SECOND         = auto()
     POT_STEAMING_SECOND = auto()
     DONE_SECOND         = auto()
 
@@ -40,7 +43,8 @@ STATE_COLORS = {
     BurnerState.EMPTY:               (80,  80,  80),
     BurnerState.POT_IDLE:            (255, 192,  0),   # 브랜드 옐로우
     BurnerState.POT_STEAMING_FIRST:  (60, 180,  60),
-    BurnerState.DONE_FIRST:          (255, 140,  0),   # 오렌지
+    BurnerState.DONE_FIRST:          (255, 140,  0),   # 오렌지 — 냉각 중
+    BurnerState.WAIT_SECOND:         (100, 160, 220),  # 파란색 — 재벌 대기
     BurnerState.POT_STEAMING_SECOND: (30,  130,  30),
     BurnerState.DONE_SECOND:         (220,  40,  40),
 }
@@ -49,24 +53,31 @@ STATE_COLORS = {
 class BurnerStateMachine:
     """단일 화구의 상태머신 + 카운트다운 타이머"""
 
-    def __init__(self, burner_id: int, countdown_first: int, countdown_second: int):
+    def __init__(
+        self,
+        burner_id: int,
+        countdown_first: int,
+        countdown_second: int,
+        done_first_timeout: int = 600,
+        pot_absent_threshold: int = 60,
+    ):
         self.burner_id   = burner_id
         self._cd_first   = countdown_first
         self._cd_second  = countdown_second
+        self._done_first_timeout  = done_first_timeout
+        self._pot_absent_threshold = pot_absent_threshold  # 완료 상태에서 EMPTY 전환까지 추가 허용 프레임
 
         self.state: BurnerState           = BurnerState.EMPTY
         self._countdown_end: float | None = None
-        self._done_time: float | None     = None
-
-        # STEAMING 중 절대 타이머가 중단되지 않음 (수동 초기화만 가능)
-        # 초벌 완료 후 '정지' 구간 관찰 여부 (재벌 대기 조건)
-        self._seen_rest_after_first: bool = False
+        self._done_time:      float | None = None
+        self._done_first_end: float | None = None  # DONE_FIRST → WAIT_SECOND 전환 시각
+        self._pot_absent_count: int = 0             # 연속 미감지 프레임 카운터
 
         # FrameProcessor가 매 감지마다 갱신
-        self.weight_detected: bool  = False   # 이번 감지에서 pot_weight 있음
-        self.vibration_score: float = 0.0     # 진동 진행도 0.0~1.0
-        self.current_angle:   float | None = None   # 검은 무게중심 상대 x (px, None=미감지)
-        self.angle_deviation: float = 0.0           # 무게중심 x std dev (px)
+        self.weight_detected: bool  = False
+        self.vibration_score: float = 0.0
+        self.current_angle:   float | None = None
+        self.angle_deviation: float = 0.0
 
     # ── 외부 이벤트 ────────────────────────────────────────────────────
 
@@ -74,8 +85,10 @@ class BurnerStateMachine:
         """
         한 프레임의 감지 결과를 받아 상태를 갱신한다.
 
-        STEAMING 상태에서는 타이머가 항상 완료까지 진행됨 (수동 초기화만 취소 가능).
-        POT_IDLE 에서만 밥솥 이탈 시 EMPTY 전환.
+        STEAMING 상태: 타이머 잠금 — 반드시 완료까지 진행 (수동 초기화만 취소 가능).
+        DONE_FIRST  : 진동 감지 없음 — pot 이탈 시 EMPTY, timeout 후 WAIT_SECOND.
+        WAIT_SECOND : 진동 감지 재활성 — 재진동 시 재벌 시작, pot 이탈 시 EMPTY.
+        DONE_SECOND : 최종 상태 — pot 이탈 시에만 EMPTY.
         """
         if self.state == BurnerState.EMPTY:
             if pot_present:
@@ -88,35 +101,55 @@ class BurnerStateMachine:
                 self._start_first()
 
         elif self.state == BurnerState.POT_STEAMING_FIRST:
-            # 타이머 잠금 — 한 번 시작하면 반드시 완료까지 진행
-            # 밥솥이 가려지거나 인식 안 돼도 절대 취소 안 함
             if self.remaining_seconds <= 0:
-                self._done_time = time.monotonic()
-                self._seen_rest_after_first = False
-                self.state = BurnerState.DONE_FIRST
+                self._done_time      = time.monotonic()
+                self._done_first_end = time.monotonic() + self._done_first_timeout
+                self.state           = BurnerState.DONE_FIRST
 
         elif self.state == BurnerState.DONE_FIRST:
-            # 初벌 완료 → 딸랑이 정지 관찰 → 재벌 대기 → 재진동 시 재벌 시작
-            if not vibrating:
-                self._seen_rest_after_first = True   # 정지 구간 확인
-            elif vibrating and self._seen_rest_after_first:
-                self._start_second()   # 정지 후 재진동 → 재벌 시작
+            # 진동 무시 — pot 이탈(debounce 적용) 또는 timeout 만료만 처리
+            if not pot_present:
+                self._pot_absent_count += 1
+                if self._pot_absent_count >= self._pot_absent_threshold:
+                    self._pot_absent_count = 0
+                    self.state = BurnerState.EMPTY
+            else:
+                self._pot_absent_count = 0
+                if self._done_first_end is not None and time.monotonic() >= self._done_first_end:
+                    self._done_first_end = None
+                    self.state = BurnerState.WAIT_SECOND
+
+        elif self.state == BurnerState.WAIT_SECOND:
+            if not pot_present:
+                self._pot_absent_count += 1
+                if self._pot_absent_count >= self._pot_absent_threshold:
+                    self._pot_absent_count = 0
+                    self.state = BurnerState.EMPTY
+            else:
+                self._pot_absent_count = 0
+                if vibrating:
+                    self._start_second()
 
         elif self.state == BurnerState.POT_STEAMING_SECOND:
-            # 타이머 잠금 — 동일하게 반드시 완료까지 진행
             if self.remaining_seconds <= 0:
                 self._done_time = time.monotonic()
-                self.state = BurnerState.DONE_SECOND
+                self.state      = BurnerState.DONE_SECOND
 
         elif self.state == BurnerState.DONE_SECOND:
-            pass  # 수동 초기화 대기 (자동 전환 없음)
+            # 최종 상태 — pot 이탈 시에만 초기화 (debounce 적용)
+            if not pot_present:
+                self._pot_absent_count += 1
+                if self._pot_absent_count >= self._pot_absent_threshold:
+                    self._pot_absent_count = 0
+                    self.state = BurnerState.EMPTY
+            else:
+                self._pot_absent_count = 0
 
         return self.state
 
     def manual_reset(self) -> None:
         """수동 초기화 → EMPTY"""
         self._reset_timer()
-        self._seen_rest_after_first = False
         self.state = BurnerState.EMPTY
 
     def manual_start(self) -> None:
@@ -124,18 +157,20 @@ class BurnerStateMachine:
         수동 타이머 강제 시작/진행.
         EMPTY / POT_IDLE               → 초벌 시작
         POT_STEAMING_FIRST             → 초벌 즉시 완료
-        DONE_FIRST                     → 재벌 시작 (강제)
+        DONE_FIRST                     → 대기 시간 스킵 → WAIT_SECOND
+        WAIT_SECOND                    → 재벌 강제 시작
         POT_STEAMING_SECOND            → 재벌 즉시 완료
         """
         if self.state in (BurnerState.EMPTY, BurnerState.POT_IDLE):
             self._start_first()
         elif self.state == BurnerState.POT_STEAMING_FIRST:
-            # 즉시 완료
             self._countdown_end = time.monotonic()
         elif self.state == BurnerState.DONE_FIRST:
+            self._done_first_end = None
+            self.state = BurnerState.WAIT_SECOND
+        elif self.state == BurnerState.WAIT_SECOND:
             self._start_second()
         elif self.state == BurnerState.POT_STEAMING_SECOND:
-            # 즉시 완료
             self._countdown_end = time.monotonic()
 
     # ── 내부 ───────────────────────────────────────────────────────────
@@ -151,9 +186,10 @@ class BurnerStateMachine:
         self.state          = BurnerState.POT_STEAMING_SECOND
 
     def _reset_timer(self) -> None:
-        self._countdown_end      = None
-        self._done_time          = None
-        self._seen_rest_after_first = False
+        self._countdown_end    = None
+        self._done_time        = None
+        self._done_first_end   = None
+        self._pot_absent_count = 0
 
     # ── 조회 프로퍼티 ──────────────────────────────────────────────────
 
@@ -171,23 +207,27 @@ class BurnerStateMachine:
 
     @property
     def phase_label(self) -> str:
-        """초벌/재벌 단계 레이블 (타이머 진행 중일 때만 표시)"""
+        """단계 레이블"""
         return {
             BurnerState.POT_STEAMING_FIRST:  "초벌",
             BurnerState.DONE_FIRST:          "초벌완료",
+            BurnerState.WAIT_SECOND:         "재벌대기",
             BurnerState.POT_STEAMING_SECOND: "재벌",
             BurnerState.DONE_SECOND:         "재벌완료",
         }.get(self.state, "")
 
     @property
     def status_label(self) -> str:
-        if self.state == BurnerState.DONE_FIRST:
-            # 아직 정지 구간을 못 봤으면 "초벌완료", 봤으면 "재벌대기"
-            return "재벌대기" if self._seen_rest_after_first else "초벌완료"
+        if self.state == BurnerState.DONE_FIRST and self._done_first_end is not None:
+            remaining = max(0.0, self._done_first_end - time.monotonic())
+            m, s = divmod(int(remaining), 60)
+            return f"{m:02d}:{s:02d}"
         return {
             BurnerState.EMPTY:               "대기",
             BurnerState.POT_IDLE:            "준비",
             BurnerState.POT_STEAMING_FIRST:  self.remaining_display,
+            BurnerState.DONE_FIRST:          "초벌완료",
+            BurnerState.WAIT_SECOND:         "재벌대기",
             BurnerState.POT_STEAMING_SECOND: self.remaining_display,
             BurnerState.DONE_SECOND:         "완료!",
         }.get(self.state, "대기")
@@ -215,8 +255,10 @@ class BurnerRegistry:
         burner_id: int,
         countdown_first: int,
         countdown_second: int,
+        done_first_timeout: int = 600,
+        pot_absent_threshold: int = 60,
     ) -> BurnerStateMachine:
-        sm = BurnerStateMachine(burner_id, countdown_first, countdown_second)
+        sm = BurnerStateMachine(burner_id, countdown_first, countdown_second, done_first_timeout, pot_absent_threshold)
         self._burners[burner_id] = sm
         return sm
 

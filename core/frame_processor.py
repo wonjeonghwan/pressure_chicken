@@ -282,6 +282,10 @@ class FrameProcessor:
             elif cur == BurnerState.DONE_FIRST and prev == BurnerState.POT_STEAMING_FIRST:
                 self._oflow[bid].reset()
 
+            elif cur == BurnerState.WAIT_SECOND and prev == BurnerState.DONE_FIRST:
+                # 재벌대기 진입 시 flow 히스토리 초기화 — 이전 DONE_FIRST 구간 누적 제거
+                self._oflow[bid].reset()
+
             self._prev_states[bid] = cur
 
     def step(self) -> dict[int, np.ndarray]:
