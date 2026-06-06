@@ -1,0 +1,33 @@
+{
+  "store_id": "store_4cam_with_burners_test",
+  "store_name": "4카메라 + 사전 화구 설정 (테스트)",
+  "sources": [
+    {"id": 0, "type": "file", "path": "raw/Side_01.mov", "label": "1구역", "resize": [1280, 720]},
+    {"id": 1, "type": "file", "path": "raw/Side_02.mov", "label": "2구역", "resize": [1280, 720]},
+    {"id": 2, "type": "file", "path": "raw/Side_03.mov", "label": "3구역", "resize": [1280, 720]},
+    {"id": 3, "type": "file", "path": "raw/Side_04.mov", "label": "4구역", "resize": [1280, 720]}
+  ],
+  "ui": {
+    "grid_cols": 2,
+    "window_size": [1600, 900],
+    "window_title": "압력밥솥 타이머 - 4카메라",
+    "target_fps": 10
+  },
+  "stabilizer": {"enabled": true, "smooth_alpha": 0.3, "min_inliers": 6},
+  "optical_flow": {
+    "enabled": true, "rms_threshold": 0.20, "rms_ema_alpha": 0.35, "pos_ema_alpha": 0.3,
+    "window_frames": 17, "trigger_frames": 9, "normalize_rms": true, "normalize_ref_diag": 40.0
+  },
+  "frequency": {"enabled": false},
+  "model": {"weights": "models/pot_seg.pt", "confidence": 0.4},
+  "burners": [
+    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
+    {"id": 2, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
+    {"id": 3, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
+    {"id": 4, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
+    {"id": 5, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
+    {"id": 6, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
+    {"id": 7, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
+    {"id": 8, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]}
+  ]
+}

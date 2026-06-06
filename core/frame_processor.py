@@ -31,6 +31,18 @@ from core.stabilizer import Stabilizer
 from core.optical_flow import OpticalFlowDetector
 
 
+def _merged_cfg(global_cfg: dict, *overlays: dict) -> dict:
+    """global default → overlay 순서로 dict를 병합. 뒤 overlay가 앞 값을 덮어씀.
+
+    각 overlay는 부분 dict만 가질 수 있음 (override 하고 싶은 키만 명시).
+    """
+    result = dict(global_cfg)
+    for ov in overlays:
+        if ov:
+            result.update(ov)
+    return result
+
+
 class FrameProcessor:
     """
     VideoSource 들에서 프레임을 읽고 Phase1+2 파이프라인으로 감지 → 상태머신 갱신.
@@ -49,20 +61,28 @@ class FrameProcessor:
         self._detector   = detector
         self._burner_map = {b["id"]: b for b in burner_cfgs}
 
-        stab_cfg = config.get("stabilizer", {})
-        flow_cfg = config.get("optical_flow", {})
+        global_stab = config.get("stabilizer", {})
+        global_flow = config.get("optical_flow", {})
 
-        # Phase 1: 소스별 Stabilizer
-        self._stabilizers: dict[int, Stabilizer] = {
-            sc["id"]: Stabilizer(stab_cfg)
-            for sc in config.get("sources", [])
-        }
+        # Phase 1: 소스별 Stabilizer — source.stabilizer 가 있으면 global을 부분 덮어씀
+        self._stabilizers: dict[int, Stabilizer] = {}
+        for sc in config.get("sources", []):
+            merged = _merged_cfg(global_stab, sc.get("stabilizer", {}))
+            self._stabilizers[sc["id"]] = Stabilizer(merged)
 
         # Phase 2: 화구별 OpticalFlowDetector
-        self._oflow: dict[int, OpticalFlowDetector] = {
-            b["id"]: OpticalFlowDetector(flow_cfg)
-            for b in burner_cfgs
-        }
+        # 합성 우선순위: global < source.optical_flow < burner.optical_flow
+        # 카메라 모델/해상도 다르면 source별, 특정 화구만 다르면 burner별 override 가능
+        sources_by_id = {sc["id"]: sc for sc in config.get("sources", [])}
+        self._oflow: dict[int, OpticalFlowDetector] = {}
+        for b in burner_cfgs:
+            sc = sources_by_id.get(b.get("source_id"), {})
+            merged = _merged_cfg(
+                global_flow,
+                sc.get("optical_flow", {}),
+                b.get("optical_flow", {}),
+            )
+            self._oflow[b["id"]] = OpticalFlowDetector(merged)
 
 
 
@@ -89,6 +109,52 @@ class FrameProcessor:
 
     def oflow(self, bid: int) -> "OpticalFlowDetector | None":
         return self._oflow.get(bid)
+
+    def estimate_roi_coverage(self, source_resolution: tuple[int, int] | None = None) -> dict[int, dict]:
+        """카메라별 ROI 합집합 면적을 비율(0~1)로 산출.
+
+        ROI들이 겹칠 수 있으니 픽셀 마스크로 정확히 계산.
+        source_resolution을 모르면 ROI bounding box 면적으로 근사.
+
+        Returns:
+            { source_id: {"n_burners": int, "coverage": float (0~1) or None, "bbox_w_h": (W,H) or None} }
+        """
+        per_src: dict[int, list[tuple[int, int, int, int]]] = {}
+        for b in self._burner_map.values():
+            roi = b.get("roi")
+            if not roi:
+                continue
+            sid = b.get("source_id", 0)
+            per_src.setdefault(sid, []).append(tuple(roi))
+
+        out: dict[int, dict] = {}
+        for sid, rois in per_src.items():
+            if not rois:
+                out[sid] = {"n_burners": 0, "coverage": None, "bbox_w_h": None}
+                continue
+            res = source_resolution
+            if res is None:
+                # ROI bounding box를 화면으로 가정 (보수적 추정 — 실제 coverage는 ≤ 이 값)
+                max_x = max(r[0] + r[2] for r in rois)
+                max_y = max(r[1] + r[3] for r in rois)
+                res = (max_x, max_y)
+            W, H = res
+            if W <= 0 or H <= 0:
+                out[sid] = {"n_burners": len(rois), "coverage": None, "bbox_w_h": (W, H)}
+                continue
+            mask = np.zeros((H, W), dtype=np.uint8)
+            for x, y, w, h in rois:
+                x1 = max(0, x); y1 = max(0, y)
+                x2 = min(W, x + w); y2 = min(H, y + h)
+                if x2 > x1 and y2 > y1:
+                    mask[y1:y2, x1:x2] = 1
+            covered = int(mask.sum())
+            out[sid] = {
+                "n_burners": len(rois),
+                "coverage": covered / (W * H),
+                "bbox_w_h": (W, H),
+            }
+        return out
 
     def read_frames(self) -> dict[int, np.ndarray]:
         frames: dict[int, np.ndarray | None] = {}
@@ -133,6 +199,7 @@ class FrameProcessor:
             # ── YOLO 추론 (보정된 프레임) ────────────────────────────────
             min_x, min_y = float('inf'), float('inf')
             max_x, max_y = 0.0, 0.0
+            min_short_side = float('inf')   # 동적 margin 계산용
             has_roi = False
             for bid in burner_ids:
                 roi = self._burner_map[bid].get("roi")
@@ -142,10 +209,14 @@ class FrameProcessor:
                     min_y = min(min_y, ry)
                     max_x = max(max_x, rx + rw)
                     max_y = max(max_y, ry + rh)
+                    min_short_side = min(min_short_side, min(rw, rh))
                     has_roi = True
 
             if has_roi:
-                margin = 50
+                # 동적 margin: ROI 짧은 변의 10%, 안전선 [30, 50]
+                #  - 작은 ROI → 작은 margin → YOLO crop 면적 절감
+                #  - 큰 ROI → 큰 margin → stabilizer 보정 후 객체 이탈 방지
+                margin = max(30, min(50, int(min_short_side * 0.1)))
                 fh, fw = stabilized.shape[:2]
                 cx1 = max(0, int(min_x) - margin)
                 cy1 = max(0, int(min_y) - margin)

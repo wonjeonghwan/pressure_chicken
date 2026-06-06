@@ -65,7 +65,7 @@ Phase 1: Stabilizer (core/stabilizer.py)
   - LK 특징점 추적 + RANSAC + EMA warpAffine
   - 카메라 흔들림 제거
   ↓
-YOLO-seg 배치 추론 (ROI 전체 1회 호출, 15fps)
+YOLO-seg 배치 추론 (ROI 합집합 crop 1회 호출, 동적 margin=max(30, min(50, ROI_short×0.1)))
   ↓
 body/weight 매칭 (ROI 중심거리 기반 그리디)
   ↓
@@ -81,6 +81,8 @@ Phase 2: OpticalFlowDetector (core/optical_flow.py)
 ```
 
 **Phase 3 (주파수 분석)**: 시도했으나 실패 → 비활성화. 상세 이유는 ACTION_PLAN.md 참조.
+
+**진단 로그**: 시작 시 카메라별 ROI 합집합 면적(%)이 콘솔에 자동 출력 — 매장 셋업에서 카메라 부담 분배 평가용. 40% 미만 ✓ / 40~65% ⚠ 적정 / 65% 이상 ⚠⚠ 카메라 추가 검토.
 
 ---
 

@@ -15,6 +15,11 @@ dataset/labels/
 *.mkv
 *.wmv
 *.m4v
+
+# 매장 거래 데이터 (조직 보안 지침 — 거래처/매출/원가 git 금지)
+raw/*.xlsx
+raw/~$*
+raw/*.csv
 __pycache__/
 *.pyc
 .DS_Store

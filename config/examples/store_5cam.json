@@ -1,0 +1,53 @@
+{
+  "store_id": "store_5cam_example",
+  "store_name": "예제 매장 — 카메라 5대 (720p)",
+  "sources": [
+    {"id": 0, "type": "camera", "index": 0, "label": "1구역", "resize": [1280, 720], "exposure": -5},
+    {"id": 1, "type": "camera", "index": 1, "label": "2구역", "resize": [1280, 720]},
+    {"id": 2, "type": "camera", "index": 2, "label": "3구역", "resize": [1280, 720]},
+    {"id": 3, "type": "camera", "index": 3, "label": "4구역", "resize": [1280, 720]},
+    {"id": 4, "type": "camera", "index": 4, "label": "5구역", "resize": [1280, 720]}
+  ],
+  "ui": {
+    "grid_cols": 2,
+    "window_size": [1280, 720],
+    "window_title": "압력밥솥 타이머",
+    "target_fps": 8
+  },
+  "stabilizer": {
+    "enabled": true,
+    "grid_rows": 6,
+    "grid_cols": 8,
+    "lk_win_size": 21,
+    "lk_max_level": 3,
+    "ransac_threshold": 3.0,
+    "smooth_alpha": 0.3,
+    "min_inliers": 6
+  },
+  "optical_flow": {
+    "enabled": true,
+    "farneback_pyr_scale": 0.5,
+    "farneback_levels": 3,
+    "farneback_winsize": 15,
+    "farneback_iterations": 3,
+    "farneback_poly_n": 5,
+    "farneback_poly_sigma": 1.2,
+    "rms_threshold": 0.20,
+    "rms_ema_alpha": 0.35,
+    "pos_ema_alpha": 0.3,
+    "max_box_jump_ratio": 0.5,
+    "window_frames": 14,
+    "trigger_frames": 7,
+    "reset_on_missing_box": false,
+    "normalize_rms": true,
+    "normalize_ref_diag": 40.0
+  },
+  "frequency": {
+    "enabled": false
+  },
+  "model": {
+    "weights": "models/pot_seg.pt",
+    "confidence": 0.4
+  },
+  "burners": []
+}

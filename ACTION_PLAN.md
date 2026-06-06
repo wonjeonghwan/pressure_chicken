@@ -1,13 +1,43 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-05-05 (UI 전면 재설계, RMS 정규화 방식 확정) | 현재 단계: Phase 2 완료 → 현장 라이브 테스트 대기
+> 최종 업데이트: 2026-06-04 (다카메라 UX 통합 + 매장 배포 준비 완료) | 현재 단계: 매장 노트북 1차 테스트 대기
+
+---
+
+## 2026-06-04 작업 — 다카메라 UX + 매장 배포 준비
+
+매장 노트북(4 카메라) 이관 직전 완료. 감지 알고리즘(Phase 1/2/State Machine)은 무수정.
+
+### A. UI/UX 통합 대시보드 개편 (`ui/ui_display.py`, `main.py`)
+- 다카메라 균등 그리드 뷰 (1대=풀화면, 2대=1×2, 3~4대=2×2, 5~6대=3×2 …)
+- 각 셀 헤더: `[Cam-N]` + 연결 상태 LED (● 연결됨 / ⛔ 프레임 없음)
+- 캘리브 드래그 → 클릭한 셀의 `source_id` 자동 귀속
+- 캘리브 ROI 클릭 선택 + DEL 삭제 + ID 자동 재정렬
+- 화구 카드에 `Cam-N` 뱃지 + 진동 게이지 항상 표시
+- 우측 패널 `[+ 추가]` / `[− 제거]` 버튼 (가용 카메라 자동 탐색)
+- 토스트 메시지 (카메라 추가/제거 등 즉시 피드백)
+
+### B. 매장 배포 준비
+- `.gitignore` 보안 보강 — `raw/*.xlsx`, `raw/~$*`, `raw/*.csv` (거래처 정보 차단)
+- **ROI 합집합 면적 진단 로그** — 콘솔에 카메라별 화구 분담 부담 출력 ([frame_processor.py](core/frame_processor.py))
+  ```
+  [diag] Cam-0: burners=2, ROI 합집합=34.7%  → ✓ 가벼움
+  [diag] Cam-1: burners=4, ROI 합집합=78.3%  → ⚠⚠ 카메라 추가 검토
+  ```
+- **동적 margin** — ROI 합집합 crop margin을 `max(30, min(50, 짧은변 × 10%))` 로 자동 산정. 작은 ROI 환경에서 YOLO 입력 면적 절감
+- `run.bat` 운영자용 실행 스크립트 — uv 자동 체크 + .venv 첫 실행 시 sync + 더블클릭 실행
+- 4영상 시뮬 config 2종: `store_4cam_video.json` (빈 화구), `store_4cam_video_with_burners.json` (사전 화구 8개)
+- `--headless` + `--screenshot` 플래그로 GUI 없이 UI 검증 가능
+- 회귀 테스트 3 시나리오 모두 통과 (1cam·4cam+8burner·4cam+0burner)
+
+상세 단계별 결과: [docs/MULTICAM_UX_WORK_LOG.md](docs/MULTICAM_UX_WORK_LOG.md)
 
 ---
 
 ## 현재 진행 위치
 
 ```
-Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  →  현장 테스트 ⏳
+Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  →  다카메라 UX ✅  →  현장 테스트 ⏳
 ```
 
 **확정된 감지 스택:**
@@ -50,9 +80,13 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 - [ ] 타이머 잠금 확인 (사람 가림, 연기 발생 시 타이머 유지)
 - [ ] 밥솥 이탈 후 재거치 → EMPTY → POT_IDLE 전환 확인
 
-### Phase 3 — 카메라 2대 확장
-- [ ] 2대 동작 확인 (config 설정 완료)
-- [ ] 20개 화구 동시 실행 성능 (15fps 유지 목표)
+### Phase 3 — 카메라 가변 N대 확장 (1~8+ 대)
+- 상세 설계: **[MULTI_CAMERA_PLAN.md](MULTI_CAMERA_PLAN.md)** 참조
+- [ ] Phase A: 가변 카메라 capture/연동 (YOLO batch 통합, resize/fps 자동 조정)
+- [ ] Phase B: UI 가변 그리드 (1/2/4/6대 자동 레이아웃 + 풀뷰 토글)
+- [ ] Phase C: 카메라 추가/제거 UX (오프라인 감지, sources 핫 리로드)
+- [ ] Phase D: 운영 안정성 (자동 재연결, 장치명 식별, 알림 사운드, 24시간 테스트)
+- [ ] Phase E: 진단 도구 다카메라 확장 (`diag_perf.py` 신규)
 
 ### 테스트 시나리오
 
