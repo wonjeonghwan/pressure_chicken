@@ -256,7 +256,7 @@ class BurnerRegistry:
         countdown_first: int,
         countdown_second: int,
         done_first_timeout: int = 600,
-        pot_absent_threshold: int = 60,
+        pot_absent_threshold: int = 30,
     ) -> BurnerStateMachine:
         sm = BurnerStateMachine(burner_id, countdown_first, countdown_second, done_first_timeout, pot_absent_threshold)
         self._burners[burner_id] = sm

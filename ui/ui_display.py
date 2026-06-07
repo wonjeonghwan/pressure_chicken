@@ -274,7 +274,7 @@ class UIDisplay:
             self.show_mask = not self.show_mask
         elif key == pygame.K_c:
             if self.on_camera_switch:
-                self.on_camera_switch()
+                self.on_camera_switch(self._selected_camera_id)
         elif key == pygame.K_ESCAPE:
             self._selected_id = None
             self._selected_camera_id = None
@@ -772,15 +772,16 @@ class UIDisplay:
             self._screen.blit(self._fonts["small"].render("✔ Z : 마지막 그린 화구 취소", True, _C_TEXT_LIGHT), (px + 40, guide_y + 180))
             return
 
-        # 스크롤 가능한/리스트 카드 영역 (간단히 Grid 2열로 표시)
+        # 스크롤 가능한/리스트 카드 영역 (4열 그리드)
         burners = sorted(self._registry.all(), key=lambda b: b.burner_id)
         if not burners:
             return
 
-        cols = 2
-        card_w = (_RIGHT_PANEL_W - 30) // cols
-        card_h = 130
-        
+        cols = 4
+        gap  = 6
+        card_w = (_RIGHT_PANEL_W - 10 - (cols - 1) * gap) // cols
+        card_h = 90
+
         self._card_rects.clear()
         self._start_rects.clear()
         self._reset_rects.clear()
@@ -788,9 +789,15 @@ class UIDisplay:
         for i, bsm in enumerate(burners):
             r = i // cols
             c = i % cols
-            cx = px + 10 + c * (card_w + 10)
-            cy = oy + r * (card_h + 10)
+            cx = px + 5 + c * (card_w + gap)
+            cy = oy + r * (card_h + gap)
             self._draw_burner_card(bsm, cx, cy, card_w, card_h)
+
+    @staticmethod
+    def _card_text_color(bg_color: tuple) -> tuple:
+        r, g, b = bg_color
+        lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        return _C_TEXT_DARK if lum > 0.4 else _C_TEXT_LIGHT
 
     def _draw_burner_card(self, bsm, x, y, w, h):
         bid = bsm.burner_id
@@ -798,87 +805,77 @@ class UIDisplay:
 
         card_rect = pygame.Rect(x, y, w, h)
         self._card_rects[bid] = card_rect
-        pygame.draw.rect(self._screen, bsm.color, card_rect, border_radius=8)
+        pygame.draw.rect(self._screen, bsm.color, card_rect, border_radius=6)
 
         bcolor = _C_SELECTED if selected else _C_CARD_BORDER
-        border_w = 4 if selected else 1
-        pygame.draw.rect(self._screen, bcolor, card_rect, border_w, border_radius=8)
+        border_w = 3 if selected else 1
+        pygame.draw.rect(self._screen, bcolor, card_rect, border_w, border_radius=6)
 
-        # ID Circle
-        pygame.draw.circle(self._screen, _C_BRAND, (x + 22, y + 26), 16)
-        id_surf = self._fonts["id"].render(str(bid), True, _C_TEXT_DARK)
-        self._screen.blit(id_surf, id_surf.get_rect(center=(x + 22, y + 26)))
+        tc = self._card_text_color(bsm.color)
 
-        # [Cam-N] 뱃지 — 우상단
+        # ID Circle (작게)
+        pygame.draw.circle(self._screen, _C_BRAND, (x + 10, y + 11), 8)
+        id_surf = self._fonts["small"].render(str(bid), True, _C_TEXT_DARK)
+        self._screen.blit(id_surf, id_surf.get_rect(center=(x + 10, y + 11)))
+
+        # [Cam-N] 뱃지 — 우상단 (짧게 C{id})
         cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
         src_id = cfg.get("source_id", 0) if cfg else 0
-        cam_badge = self._fonts["small"].render(f"Cam-{src_id}", True, _C_TEXT_DARK)
-        badge_pad = 4
-        badge_w = cam_badge.get_width() + badge_pad * 2
-        badge_h = cam_badge.get_height() + 2
-        badge_rect = pygame.Rect(x + w - badge_w - 6, y + 6, badge_w, badge_h)
-        pygame.draw.rect(self._screen, _C_BRAND, badge_rect, border_radius=3)
-        self._screen.blit(cam_badge, (badge_rect.x + badge_pad, badge_rect.y + 1))
+        cam_surf = self._fonts["small"].render(f"C{src_id}", True, _C_TEXT_DARK)
+        bp = 3
+        badge_rect = pygame.Rect(x + w - cam_surf.get_width() - bp * 2 - 3, y + 3,
+                                 cam_surf.get_width() + bp * 2, cam_surf.get_height() + 2)
+        pygame.draw.rect(self._screen, _C_BRAND, badge_rect, border_radius=2)
+        self._screen.blit(cam_surf, (badge_rect.x + bp, badge_rect.y + 1))
 
-        # Phase / Timer
-        ph_surf = self._fonts["small"].render(bsm.phase_label or "대기 상태", True, _C_TEXT_LIGHT)
-        self._screen.blit(ph_surf, (x + 46, y + 10))
+        # Phase label
+        ph_surf = self._fonts["small"].render(bsm.phase_label or "대기", True, tc)
+        self._screen.blit(ph_surf, (x + 22, y + 4))
 
-        font = self._fonts["timer"] if bsm.state in _STEAMING else self._fonts["label"]
-        color = (255, 255, 255)
+        # Timer / Status
+        t_color = tc
         if bsm.state == BurnerState.DONE_SECOND:
-            color = _C_WARNING_BG if (int(time.time() * 2) % 2 == 0) else _C_TEXT_LIGHT
+            t_color = _C_WARNING_BG if (int(time.time() * 2) % 2 == 0) else _C_TEXT_LIGHT
+        time_surf = self._fonts["label"].render(bsm.status_label, True, t_color)
+        self._screen.blit(time_surf, (x + 4, y + 22))
 
-        time_surf = font.render(bsm.status_label, True, color)
-        self._screen.blit(time_surf, (x + 46, y + 26))
+        # RMS hint
+        hint = f"RMS {bsm.current_angle:.2f}" if bsm.current_angle is not None else "대기"
+        hint_surf = self._fonts["small"].render(hint, True, tc)
+        self._screen.blit(hint_surf, (x + 4, y + 42))
 
-        # 진동 게이지 — 항상 표시 (Track A 추가 항목)
-        gauge_y = y + h - 40
-        gauge_x = x + 8
-        gauge_w = w - 16
-        gauge_h = 6
+        # 진동 게이지
+        gauge_x, gauge_y = x + 4, y + 56
+        gauge_w, gauge_h = w - 8, 4
         pygame.draw.rect(self._screen, (40, 40, 40), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=2)
         score = max(0.0, min(1.0, bsm.vibration_score))
         if score > 0:
             fill_color = _C_SUCCESS if score < 1.0 else _C_WARNING_BG
             pygame.draw.rect(self._screen, fill_color,
-                             (gauge_x, gauge_y, int(gauge_w * score), gauge_h),
-                             border_radius=2)
-        # window 투표 (n/N) 작게 — 게이지 위
-        try:
-            from core.state_machine import _STEAMING as _S
-            # processor 의존성을 직접 잡지 않고 angle_deviation으로 대용
-            if bsm.current_angle is not None:
-                hint = f"RMS {bsm.current_angle:.2f}"
-            else:
-                hint = "대기"
-            hint_surf = self._fonts["small"].render(hint, True, _C_TEXT_LIGHT)
-            self._screen.blit(hint_surf, (gauge_x, gauge_y - 14))
-        except Exception:
-            pass
+                             (gauge_x, gauge_y, int(gauge_w * score), gauge_h), border_radius=2)
 
         # 하단 버튼
         from core.state_machine import BurnerState as BS
-        if bsm.state in (BS.EMPTY, BS.POT_IDLE): start_label = "조작"
+        if bsm.state in (BS.EMPTY, BS.POT_IDLE): start_label = "시작"
         elif bsm.state == BS.POT_STEAMING_FIRST: start_label = "완료"
         elif bsm.state == BS.DONE_FIRST: start_label = "건너뜀"
         elif bsm.state == BS.WAIT_SECOND: start_label = "재벌"
         elif bsm.state == BS.POT_STEAMING_SECOND: start_label = "완료"
         else: start_label = "시작"
 
-        bw = (w - 20) // 2
-        bh = 22
-        by = y + h - bh - 6
+        bw = (w - 10) // 2
+        bh = 18
+        by = y + h - bh - 4
 
-        btn_r = pygame.Rect(x + 6, by, bw, bh)
-        btn_s = pygame.Rect(x + 6 + bw + 8, by, bw, bh)
+        btn_r = pygame.Rect(x + 3, by, bw, bh)
+        btn_s = pygame.Rect(x + 3 + bw + 4, by, bw, bh)
 
         self._reset_rects[bid] = btn_r
         self._start_rects[bid] = btn_s
 
         hold_prog = min(1.0, (time.monotonic() - self._reset_hold[bid]) / _RESET_HOLD_S) if bid in self._reset_hold else 0.0
 
-        self._draw_btn(btn_r, "초기화(R)" if selected else "리셋", (80, 80, 90), hold_prog)
+        self._draw_btn(btn_r, "R", (80, 80, 90), hold_prog)
         self._draw_btn(btn_s, f"{start_label}(S)" if selected else start_label, _C_SUCCESS)
 
     def _draw_btn(self, rect: pygame.Rect, text: str, color, hold=0.0):

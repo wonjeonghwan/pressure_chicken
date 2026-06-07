@@ -188,13 +188,14 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     _last_cam_switch = 0.0
     _CAM_SWITCH_COOLDOWN = 0.5
 
-    def trigger_camera_switch():
+    def trigger_camera_switch(selected_src_id=None):
         nonlocal _last_cam_switch
         now = _time.monotonic()
         if now - _last_cam_switch < _CAM_SWITCH_COOLDOWN:
             return
         _last_cam_switch = now
-        for src_id in list(cam_indices):
+        targets = [selected_src_id] if selected_src_id in cam_indices else list(cam_indices)
+        for src_id in targets:
             cam_indices[src_id] = switch_camera(
                 sources, src_id, cam_indices[src_id],
                 config=config, config_path=config.get("_path")

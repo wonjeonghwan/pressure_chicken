@@ -16,10 +16,15 @@ import numpy as np
 class VideoSource:
     """카메라 또는 파일을 동일한 인터페이스로 제공"""
 
+    _RECONNECT_THRESHOLD = 10   # 연속 실패 N회 시 재연결 시도
+    _RECONNECT_COOLDOWN  = 3.0  # 재연결 시도 최소 간격 (초)
+
     def __init__(self, source_cfg: dict):
         self._cfg = source_cfg
         self._cap: cv2.VideoCapture | None = None
         self.failed = False  # 열기 실패 여부
+        self._fail_count   = 0
+        self._last_reconnect = 0.0
 
     def open(self) -> None:
         src_type = self._cfg.get("type", "camera")
@@ -56,6 +61,31 @@ class VideoSource:
             else:
                 print(f"[VideoSource] 노출 설정 미지원 (카메라 드라이버 불가) — gamma로 대체 권장")
 
+    def _try_reconnect(self) -> None:
+        """카메라 재연결 시도 (카메라 소스 전용)."""
+        import sys, time
+        now = time.monotonic()
+        if now - self._last_reconnect < self._RECONNECT_COOLDOWN:
+            return
+        self._last_reconnect = now
+        index = self._cfg.get("index", 0)
+        print(f"[VideoSource] 재연결 시도: index={index}")
+        if self._cap is not None:
+            self._cap.release()
+        if sys.platform == "win32":
+            cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(index)
+        if cap.isOpened():
+            self._cap = cap
+            self._fail_count = 0
+            self.failed = False
+            print(f"[VideoSource] 재연결 성공: index={index}")
+        else:
+            cap.release()
+            self._cap = None
+            print(f"[VideoSource] 재연결 실패: index={index}")
+
     def read(self) -> tuple[bool, np.ndarray | None]:
         """프레임 한 장 읽기. 파일 끝이면 처음부터 루프."""
         if self._cap is None:
@@ -66,6 +96,15 @@ class VideoSource:
         if not ret and self._cfg.get("type") == "file":
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self._cap.read()
+
+        # 카메라 소스: 연속 실패 시 재연결
+        if self._cfg.get("type", "camera") == "camera":
+            if not ret:
+                self._fail_count += 1
+                if self._fail_count >= self._RECONNECT_THRESHOLD:
+                    self._try_reconnect()
+            else:
+                self._fail_count = 0
 
         # 파일 소스: target_fps 기준으로 프레임 스킵 (실시간 카메라와 동일한 시간축 유지)
         # _skip_frames = round(video_fps / target_fps), main.py에서 주입
