@@ -102,6 +102,27 @@ class UIDisplay:
         self._toast_msg: str | None = None
         self._toast_until: float = 0.0
 
+        # 신규 추가 상태 변수 (소리 및 트래킹)
+        self.mute = False
+        self._sound_rect: pygame.Rect | None = None
+        self._sound_warn_30s = None
+        self._sound_complete = None
+        self._sound_cam_lost = None
+        self._prev_remaining: dict[int, float] = {}
+        self._prev_states: dict[int, BurnerState] = {}
+        self._cam_offline_since: dict[int, float] = {}
+        self._cam_lost_played: dict[int, bool] = {}
+        self._sorted_burners_cache = []
+
+        # 작업 G — 패널 가시성 조정
+        self._right_panel_w: int = self._cfg.get("right_panel_w", _RIGHT_PANEL_W)
+        self._video_hidden: bool = False
+        self._dragging_divider: bool = False
+        # 카메라 풀뷰(단독 확대) — 영상 더블클릭으로 토글
+        self._focus_camera_id: int | None = None
+        self._last_click_src: int | None = None
+        self._last_click_time: float = 0.0
+
     def init(self) -> None:
         pygame.init()
         # Responsive 기본 1280x720
@@ -112,6 +133,32 @@ class UIDisplay:
         pygame.display.set_caption("길가옆에 압력밥솥 타이머 시스템")
         self._clock = pygame.time.Clock()
         self._fonts = _load_fonts()
+
+        # Pygame 오디오 믹서 초기화 (사운드 에셋 로드)
+        try:
+            pygame.mixer.init()
+            sound_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sounds")
+            w_path = os.path.join(sound_dir, "warn_30s.wav")
+            c_path = os.path.join(sound_dir, "complete.wav")
+            l_path = os.path.join(sound_dir, "cam_lost.wav")
+            
+            # 절대경로 폴백 지원
+            if not os.path.exists(w_path):
+                w_path = "assets/sounds/warn_30s.wav"
+            if not os.path.exists(c_path):
+                c_path = "assets/sounds/complete.wav"
+            if not os.path.exists(l_path):
+                l_path = "assets/sounds/cam_lost.wav"
+
+            if os.path.exists(w_path):
+                self._sound_warn_30s = pygame.mixer.Sound(w_path)
+            if os.path.exists(c_path):
+                self._sound_complete = pygame.mixer.Sound(c_path)
+            if os.path.exists(l_path):
+                self._sound_cam_lost = pygame.mixer.Sound(l_path)
+            print("[UI] pygame.mixer 사운드 로드 성공")
+        except Exception as e:
+            print(f"[UI] pygame.mixer 초기화 실패 (무음 작동): {e}")
 
         # Config에 화구가 없으면 자동 캘리브레이션 진입
         if not self.config_data.get("burners", []):
@@ -275,14 +322,21 @@ class UIDisplay:
         elif key == pygame.K_c:
             if self.on_camera_switch:
                 self.on_camera_switch(self._selected_camera_id)
+        elif key == pygame.K_n:
+            self.mute = not self.mute
+            self._show_toast("음소거 ON" if self.mute else "음소거 OFF")
         elif key == pygame.K_ESCAPE:
             self._selected_id = None
             self._selected_camera_id = None
+            self._focus_camera_id = None
         elif key == pygame.K_f:
             self.start_calibration()
         elif key == pygame.K_d:
             self.dev_mode = not self.dev_mode
-            
+        elif key == pygame.K_v:
+            self._video_hidden = not self._video_hidden
+            self._show_toast("영상 숨김 (카드만 보기)" if self._video_hidden else "영상 표시")
+
         # 화구 선택
         num_map = {
             pygame.K_1: 1, pygame.K_2: 2, pygame.K_3: 3,
@@ -352,6 +406,19 @@ class UIDisplay:
                 self._calib_selected_idx = None
             return
 
+        # 분할선 드래그 시작 (영상 표시 중일 때만, 다른 클릭보다 우선)
+        if not self._video_hidden and self._screen is not None:
+            divider_x = self._screen.get_width() - self._right_panel_w
+            if abs(pos[0] - divider_x) <= 6:
+                self._dragging_divider = True
+                return
+
+        # 소리 토글 버튼 클릭 (px 영역 정의 필요하나 렌더링 때 저장해 둔 Rect 사용)
+        if self._sound_rect and self._sound_rect.collidepoint(pos):
+            self.mute = not self.mute
+            self._show_toast("음소거 ON" if self.mute else "음소거 OFF")
+            return
+
         # 카메라 +/- 버튼
         if self._cam_add_rect and self._cam_add_rect.collidepoint(pos):
             if self.on_camera_add:
@@ -393,14 +460,28 @@ class UIDisplay:
                 self._selected_id = bid if self._selected_id != bid else None
                 return
 
-        # 영상 영역 클릭 → 카메라 선택 토글 (캘리브 외 일반 모드 전용)
+        # 영상 영역 클릭 → 단일클릭=카메라 선택 토글 / 더블클릭=풀뷰 토글
         v_pos = self._to_video_pos(pos)
         if v_pos:
             src_id = v_pos[0]
-            self._selected_camera_id = src_id if self._selected_camera_id != src_id else None
+            now = time.monotonic()
+            if self._last_click_src == src_id and (now - self._last_click_time) < 0.4:
+                # 더블클릭 → 풀뷰(단독 확대) 토글
+                self._focus_camera_id = None if self._focus_camera_id == src_id else src_id
+                self._show_toast("풀뷰 (더블클릭으로 그리드 복귀)" if self._focus_camera_id else "그리드 보기")
+                self._last_click_src = None
+            else:
+                self._selected_camera_id = src_id if self._selected_camera_id != src_id else None
+                self._last_click_src = src_id
+                self._last_click_time = now
             return
 
     def _on_mouse_move(self, pos: tuple[int, int]) -> None:
+        if self._dragging_divider and self._screen is not None:
+            sw = self._screen.get_width()
+            # 패널 폭 = 창 너비 - 마우스 x. MIN=300(카드 최소), MAX=sw(영상 0 = 카드 전체)
+            self._right_panel_w = max(300, min(sw, sw - pos[0]))
+            return
         if self.calibration_mode and self._calib_dragging:
             v_pos = self._to_video_pos(pos)
             if v_pos and v_pos[0] == self._calib_active_source:
@@ -408,6 +489,11 @@ class UIDisplay:
                 self._calib_drag_end = (v_pos[1], v_pos[2])
 
     def _on_mouse_up(self, pos: tuple[int, int]) -> None:
+        if self._dragging_divider:
+            self._dragging_divider = False
+            # 변경된 폭을 ui 설정에 기록(다음 캘리브 저장 시 함께 영구 저장됨)
+            self._cfg["right_panel_w"] = self._right_panel_w
+            return
         if self.calibration_mode and self._calib_dragging:
             self._calib_dragging = False
             if self._calib_drag_start and self._calib_drag_end and self._calib_active_source is not None:
@@ -446,22 +532,30 @@ class UIDisplay:
 
         sw, sh = self._screen.get_size()
         self._screen.fill(_C_BG)
-        
-        main_w = sw - _RIGHT_PANEL_W
 
-        # 1. 왼쪽 카메라 그리드 렌더링 (모든 source 동시 표시)
-        self._draw_camera_grid(frames or {}, processor, main_w, sh)
+        # 패널 폭 결정 — 영상 숨김 시 패널이 전체 폭. 창 크기에 맞춰 클램프.
+        if self._video_hidden:
+            panel_w = sw
+        else:
+            panel_w = max(300, min(sw, self._right_panel_w))
+            self._right_panel_w = panel_w
+        main_w = sw - panel_w
 
-        if self.calibration_mode:
-            self._draw_calibration_overlay(main_w, sh)
-        
+        # 1. 왼쪽 카메라 그리드 렌더링 (영상 영역이 있을 때만)
+        if main_w > 0:
+            self._draw_camera_grid(frames or {}, processor, main_w, sh)
+            if self.calibration_mode:
+                self._draw_calibration_overlay(main_w, sh)
+
         # 2. 오른쪽 제어 패널 렌더링
-        right_panel = pygame.Rect(main_w, 0, _RIGHT_PANEL_W, sh)
+        right_panel = pygame.Rect(main_w, 0, panel_w, sh)
         pygame.draw.rect(self._screen, _C_PANEL, right_panel)
-        # 패널 왼쪽 구분선
-        pygame.draw.line(self._screen, _C_CARD_BORDER, (main_w, 0), (main_w, sh), 2)
-        
-        self._draw_right_panel(main_w, sh)
+        # 패널 왼쪽 구분선 + 드래그 핸들 (영상 표시 중일 때만)
+        if main_w > 0:
+            pygame.draw.line(self._screen, _C_CARD_BORDER, (main_w, 0), (main_w, sh), 2)
+            self._draw_divider_handle(main_w, sh)
+
+        self._draw_right_panel(main_w, sh, panel_w)
 
         # Toast (있으면)
         if self._toast_msg and time.monotonic() < self._toast_until:
@@ -476,6 +570,12 @@ class UIDisplay:
         if self._clock:
             self._clock.tick(30) # 30fps UI Redraw
 
+    def _draw_divider_handle(self, x: int, sh: int) -> None:
+        """분할선 중앙에 세로 그립(점 3개) — 끌 수 있다는 발견성 표시."""
+        cy = sh // 2
+        for dy in (-12, 0, 12):
+            pygame.draw.circle(self._screen, _C_BRAND, (x, cy + dy), 2)
+
     def _grid_dims(self, n: int) -> tuple[int, int]:
         """카메라 N대 → (cols, rows). 1:풀화면, 2:1×2, 3~4:2×2, 5~6:3×2, 7~9:3×3, …"""
         if n <= 1: return (1, 1)
@@ -487,12 +587,37 @@ class UIDisplay:
         return (4, 4)
 
     def _draw_camera_grid(self, frames: dict, processor, box_w: int, box_h: int):
-        """카메라 N대를 균등 그리드로 표시. 각 셀의 _cam_cells 기록."""
-        sources_cfg = self.config_data.get("sources", [])
-        n = len(sources_cfg)
-        if n == 0:
+        """카메라 N대를 균등 그리드로 표시. 각 셀의 _cam_cells 기록.
+
+        풀뷰(_focus_camera_id) 지정 시 해당 카메라만 영상 영역 전체로 크게 표시.
+        오프라인 추적은 풀뷰 여부와 무관하게 전체 카메라 대상으로 수행.
+        """
+        all_sources = self.config_data.get("sources", [])
+        if not all_sources:
             return
 
+        # 오프라인 상태 지속 시간 체크 및 소리 재생 (전체 카메라 대상)
+        now = time.monotonic()
+        for sc in all_sources:
+            sid = sc["id"]
+            frame = frames.get(sid)
+            if frame is None:
+                if sid not in self._cam_offline_since:
+                    self._cam_offline_since[sid] = now
+            else:
+                self._cam_offline_since.pop(sid, None)
+                self._cam_lost_played.pop(sid, None)
+
+        # 렌더 대상 — 풀뷰면 포커스 카메라만 (캘리브 모드에서는 항상 전체)
+        sources_cfg = all_sources
+        if self._focus_camera_id is not None and not self.calibration_mode:
+            focused = [s for s in all_sources if s["id"] == self._focus_camera_id]
+            if focused:
+                sources_cfg = focused
+            else:
+                self._focus_camera_id = None  # 포커스 카메라가 사라졌으면 해제
+
+        n = len(sources_cfg)
         cols, rows = self._grid_dims(n)
         cell_w = (box_w - _CELL_GAP * (cols + 1)) // cols
         cell_h = (box_h - _CELL_GAP * (rows + 1)) // rows
@@ -512,8 +637,22 @@ class UIDisplay:
             frame = frames.get(src_id)
             self._draw_camera_cell(sc, frame, processor, ox, oy, cell_w, cell_h)
 
+            # 카메라 유실 3초 이상이면 빨간색 점멸 테두리
+            is_lost = False
+            if src_id in self._cam_offline_since:
+                if now - self._cam_offline_since[src_id] >= 3.0:
+                    is_lost = True
+                    # 최초 경보음 재생
+                    if not self.mute and self._sound_cam_lost:
+                        if not self._cam_lost_played.get(src_id, False):
+                            self._sound_cam_lost.play()
+                            self._cam_lost_played[src_id] = True
+
+            if is_lost:
+                if int(time.time() * 3) % 2 == 0:
+                    pygame.draw.rect(self._screen, _C_FAILED, cell_bg, width=4, border_radius=4)
             # 선택된 카메라면 외곽에 노란 스트로크
-            if self._selected_camera_id == src_id:
+            elif self._selected_camera_id == src_id:
                 pygame.draw.rect(self._screen, _C_BRAND, cell_bg, width=4, border_radius=4)
 
     def _draw_camera_cell(self, sc: dict, frame, processor, ox: int, oy: int, cw: int, ch: int):
@@ -582,10 +721,12 @@ class UIDisplay:
                             cv2.line(vis, pt1, pt2, color_bgr, 2)
 
                         text = f"#{bid}"
-                        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                        fs = 1.2 if self.dev_mode else 0.5
+                        thick = 3 if self.dev_mode else 1
+                        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
                         cv2.rectangle(vis, (bx1, by1 - th - 6), (bx1 + tw + 6, by1), color_bgr, -1)
                         text_c = (0, 0, 0) if (g_c > 150 or r_c > 150) else (255, 255, 255)
-                        cv2.putText(vis, text, (bx1 + 3, by1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_c, 1)
+                        cv2.putText(vis, text, (bx1 + 3, by1 - 3), cv2.FONT_HERSHEY_SIMPLEX, fs, text_c, thick)
 
                     if bid in processor.last_weight_boxes:
                         wx1, wy1, wx2, wy2 = processor.last_weight_boxes[bid]
@@ -694,24 +835,24 @@ class UIDisplay:
         self._screen.blit(title, (20, 8))
         self._screen.blit(desc, (20, 36))
 
-    def _draw_right_panel(self, px: int, ph: int):
+    def _draw_right_panel(self, px: int, ph: int, panel_w: int = _RIGHT_PANEL_W):
         # 상단 헤더 (로고/타이틀 영역)
         header_h = 70
-        pygame.draw.rect(self._screen, _C_BRAND, (px, 0, _RIGHT_PANEL_W, header_h))
+        pygame.draw.rect(self._screen, _C_BRAND, (px, 0, panel_w, header_h))
         title_surf = self._fonts["title"].render("길가옆에 압력밥솥 타이머", True, _C_TEXT_DARK)
         self._screen.blit(title_surf, (px + 20, 20))
         
         # 모델 부재 경고
         oy = header_h + 10
         if self._model_missing:
-            wrng = pygame.Rect(px + 10, oy, _RIGHT_PANEL_W - 20, 36)
+            wrng = pygame.Rect(px + 10, oy, panel_w - 20, 36)
             pygame.draw.rect(self._screen, _C_WARNING_BG, wrng, border_radius=6)
             msg = self._fonts["small"].render("⚠ AI 모델 없음 (수동 구동만 가능)", True, _C_TEXT_LIGHT)
             self._screen.blit(msg, (px + 20, oy + 10))
             oy += 46
 
         # 상태 및 툴바
-        toolbar_rect = pygame.Rect(px + 10, oy, _RIGHT_PANEL_W - 20, 64)
+        toolbar_rect = pygame.Rect(px + 10, oy, panel_w - 20, 64)
         pygame.draw.rect(self._screen, _C_CARD_BG, toolbar_rect, border_radius=6)
         
         conf_btn = self._fonts["small"].render("⚙ 설정(F)", True, _C_BRAND if not self.calibration_mode else _C_TEXT_LIGHT)
@@ -727,11 +868,16 @@ class UIDisplay:
         self._screen.blit(dev_btn, (px + 20, oy + 36))
         self._screen.blit(play_btn, (px + 110, oy + 36))
 
+        # 소리 ON/OFF 버튼 렌더링 및 클릭 영역 지정
+        sound_btn = self._fonts["small"].render(f"소리(N): {'OFF' if self.mute else 'ON'}", True, _C_BRAND if not self.mute else _C_FAILED)
+        self._screen.blit(sound_btn, (px + 210, oy + 36))
+        self._sound_rect = pygame.Rect(px + 210, oy + 32, 100, 24)
+
         oy += 74
 
         # 카메라 관리 — 현재 대수 + +/- 버튼
         n_cams = len(self.config_data.get("sources", []))
-        cam_bar = pygame.Rect(px + 10, oy, _RIGHT_PANEL_W - 20, 44)
+        cam_bar = pygame.Rect(px + 10, oy, panel_w - 20, 44)
         pygame.draw.rect(self._screen, _C_CARD_BG, cam_bar, border_radius=6)
 
         sel_hint = f"  (선택: Cam-{self._selected_camera_id})" if self._selected_camera_id is not None else ""
@@ -739,7 +885,7 @@ class UIDisplay:
         self._screen.blit(cam_label, (px + 20, oy + 14))
 
         btn_w, btn_h = 70, 28
-        add_x = px + _RIGHT_PANEL_W - 20 - btn_w
+        add_x = px + panel_w - 20 - btn_w
         rem_x = add_x - btn_w - 6
         self._cam_remove_rect = pygame.Rect(rem_x, oy + 8, btn_w, btn_h)
         self._cam_add_rect = pygame.Rect(add_x, oy + 8, btn_w, btn_h)
@@ -773,14 +919,31 @@ class UIDisplay:
             return
 
         # 스크롤 가능한/리스트 카드 영역 (4열 그리드)
-        burners = sorted(self._registry.all(), key=lambda b: b.burner_id)
+        # 마우스 Hover 판정을 통한 정렬 Freeze 잠금 장치
+        mx, my = pygame.mouse.get_pos()
+        panel_rect = pygame.Rect(px + 5, oy, panel_w - 10, ph - oy)
+        is_hovering = panel_rect.collidepoint((mx, my))
+
+        # 캐시가 없거나 호버 중이 아닐 때만 정렬 순서 업데이트
+        if not getattr(self, "_sorted_burners_cache", None) or not is_hovering:
+            HOLD_S = 8.0
+            def sort_key(b):
+                if b.is_counting:
+                    return (0, b.remaining_seconds, b.burner_id)
+                sd = b.seconds_since_done
+                if 0 <= sd <= HOLD_S:
+                    return (1, sd, b.burner_id)
+                return (2, b.burner_id, 0)
+            self._sorted_burners_cache = sorted(self._registry.all(), key=sort_key)
+
+        burners = self._sorted_burners_cache
         if not burners:
             return
 
         cols = 4
         gap  = 6
-        card_w = (_RIGHT_PANEL_W - 10 - (cols - 1) * gap) // cols
-        card_h = 90
+        card_w = (panel_w - 10 - (cols - 1) * gap) // cols
+        card_h = 102
 
         self._card_rects.clear()
         self._start_rects.clear()
@@ -803,80 +966,163 @@ class UIDisplay:
         bid = bsm.burner_id
         selected = (bid == self._selected_id)
 
-        card_rect = pygame.Rect(x, y, w, h)
+        # 알림음 재생 제어 (작업 E)
+        cur_rem = bsm.remaining_seconds
+        prev_rem = self._prev_remaining.get(bid, cur_rem)
+
+        # 1) 완료 30초 전 예고 (남은 시간이 30초 선을 막 통과했을 때)
+        from core.state_machine import BurnerState as BS
+        if bsm.is_counting and prev_rem > 30 >= cur_rem > 0:
+            if not self.mute and self._sound_warn_30s:
+                self._sound_warn_30s.play()
+
+        # 2) 완료 순간 전이 (STEAMING -> DONE_FIRST 또는 DONE_SECOND)
+        prev_st = self._prev_states.get(bid, bsm.state)
+        if prev_st in (BS.POT_STEAMING_FIRST, BS.POT_STEAMING_SECOND) and bsm.state in (BS.DONE_FIRST, BS.DONE_SECOND):
+            if not self.mute and self._sound_complete:
+                self._sound_complete.play()
+
+        self._prev_remaining[bid] = cur_rem
+        self._prev_states[bid] = bsm.state
+
+        # --- 섀도우(그림자) 효과 렌더링 (세련된 입체감) ---
+        shadow_rect = pygame.Rect(x + 2, y + 3, w - 2, h - 2)
+        pygame.draw.rect(self._screen, (15, 15, 18), shadow_rect, border_radius=8)
+
+        card_rect = pygame.Rect(x, y, w - 2, h - 2)
         self._card_rects[bid] = card_rect
-        pygame.draw.rect(self._screen, bsm.color, card_rect, border_radius=6)
 
-        bcolor = _C_SELECTED if selected else _C_CARD_BORDER
-        border_w = 3 if selected else 1
-        pygame.draw.rect(self._screen, bcolor, card_rect, border_w, border_radius=6)
+        # 고급스럽게 조율된 세련된 다크 테마 색상 맵핑
+        CUSTOM_COLORS = {
+            BS.EMPTY:               (42,  42,  48),   # 차분한 다크 그레이
+            BS.POT_IDLE:            (225, 165,  10),   # 골드 머스터드
+            BS.POT_STEAMING_FIRST:  (40,  167,  69),   # 부트스트랩 그린
+            BS.DONE_FIRST:          (253, 126,  20),   # 세련된 오렌지
+            BS.WAIT_SECOND:         (52,  144, 222),   # 소프트 클래식 블루
+            BS.POT_STEAMING_SECOND: (25,  110,  25),   # 포레스트 다크 그린
+            BS.DONE_SECOND:         (220,  53,  69),   # 팝레드
+        }
 
-        tc = self._card_text_color(bsm.color)
+        # 완료 화구 전역 동기화 점멸 적용
+        bg_color = CUSTOM_COLORS.get(bsm.state, (45, 45, 52))
+        if bsm.state == BS.DONE_SECOND:
+            bg_color = CUSTOM_COLORS[BS.DONE_SECOND] if int(time.time() * 2) % 2 == 0 else (80, 15, 20)
 
-        # ID Circle (작게)
-        pygame.draw.circle(self._screen, _C_BRAND, (x + 10, y + 11), 8)
-        id_surf = self._fonts["small"].render(str(bid), True, _C_TEXT_DARK)
-        self._screen.blit(id_surf, id_surf.get_rect(center=(x + 10, y + 11)))
+        pygame.draw.rect(self._screen, bg_color, card_rect, border_radius=8)
 
-        # [Cam-N] 뱃지 — 우상단 (짧게 C{id})
+        # 세련된 보더라인 (선택 테두리는 브랜드 컬러, 평소에는 은은한 반투명 느낌의 테두리)
+        bcolor = _C_SELECTED if selected else (80, 80, 90)
+        border_w = 2 if selected else 1
+        pygame.draw.rect(self._screen, bcolor, card_rect, border_w, border_radius=8)
+
+        tc = self._card_text_color(bg_color)
+
+        # --- 1. 화구 번호 (일반 모드: 좌상단에 크고 굵은 숫자 / dev_mode: 상단 콤팩트 축소) ---
+        if self.dev_mode:
+            # 개발 모드: 콤팩트한 번호 배지
+            rad = 8
+            cx, cy = x + 10, y + 11
+            pygame.draw.circle(self._screen, _C_BRAND, (cx, cy), rad)
+            id_surf = self._fonts["small"].render(str(bid), True, _C_TEXT_DARK)
+            self._screen.blit(id_surf, id_surf.get_rect(center=(cx, cy)))
+        else:
+            # 일반 모드: 크고 수려한 화구 번호 텍스트
+            num_str = f"{bid:02d}" if bid >= 10 else str(bid)
+            id_surf = self._fonts["card_num"].render(num_str, True, tc)
+            self._screen.blit(id_surf, (x + 8, y + 4))
+
+        # --- 2. [Cam-N] 뱃지 (우상단 정렬) ---
         cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
         src_id = cfg.get("source_id", 0) if cfg else 0
-        cam_surf = self._fonts["small"].render(f"C{src_id}", True, _C_TEXT_DARK)
-        bp = 3
-        badge_rect = pygame.Rect(x + w - cam_surf.get_width() - bp * 2 - 3, y + 3,
+        cam_surf = self._fonts["small"].render(f"C{src_id}", True, tc)
+        bp = 4
+        badge_rect = pygame.Rect(x + w - cam_surf.get_width() - bp * 2 - 8, y + 5,
                                  cam_surf.get_width() + bp * 2, cam_surf.get_height() + 2)
-        pygame.draw.rect(self._screen, _C_BRAND, badge_rect, border_radius=2)
+        pygame.draw.rect(self._screen, (30, 30, 35, 100), badge_rect, border_radius=3)
+        # 카메라 뱃지 얇은 테두리
+        pygame.draw.rect(self._screen, (100, 100, 110, 100), badge_rect, 1, border_radius=3)
         self._screen.blit(cam_surf, (badge_rect.x + bp, badge_rect.y + 1))
 
-        # Phase label
-        ph_surf = self._fonts["small"].render(bsm.phase_label or "대기", True, tc)
-        self._screen.blit(ph_surf, (x + 22, y + 4))
+        # --- 3. 상태 메시지 및 타이머 (3단 텍스트 중복/침범 소거 완료) ---
+        # EMPTY / POT_IDLE / WAIT_SECOND / DONE_SECOND -> 단 1개의 큼직한 한글 텍스트만 노출
+        # STEAMING / DONE_FIRST -> 단계 뱃지 + 중앙 큼직한 타이머 노출
+        if bsm.state in (BS.EMPTY, BS.POT_IDLE, BS.WAIT_SECOND, BS.DONE_SECOND):
+            status_text = {
+                BS.EMPTY: "대기",
+                BS.POT_IDLE: "준비",
+                BS.WAIT_SECOND: "재벌대기",
+                BS.DONE_SECOND: "완료!",
+            }.get(bsm.state, "대기")
+            
+            # 중앙에 정갈하게 배치
+            st_surf = self._fonts["card_status"].render(status_text, True, tc)
+            self._screen.blit(st_surf, (x + 8, y + 34))
+        else:
+            # 타이머 작동 중인 상태 (STEAMING_FIRST, STEAMING_SECOND, DONE_FIRST)
+            # 단계 뱃지 렌더링
+            ph_label = bsm.phase_label
+            if bsm.state == BS.DONE_FIRST:
+                ph_label = "냉각 중"
+            
+            ph_surf = self._fonts["small"].render(ph_label, True, tc)
+            # 단계 뱃지 위치 (화구 번호 우측 공간)
+            offset_x = x + 34 if not self.dev_mode else x + 24
+            self._screen.blit(ph_surf, (offset_x, y + 8))
 
-        # Timer / Status
-        t_color = tc
-        if bsm.state == BurnerState.DONE_SECOND:
-            t_color = _C_WARNING_BG if (int(time.time() * 2) % 2 == 0) else _C_TEXT_LIGHT
-        time_surf = self._fonts["label"].render(bsm.status_label, True, t_color)
-        self._screen.blit(time_surf, (x + 4, y + 22))
+            # 중앙 타이머 표시 (가장 큼직하고 뚜렷하게)
+            t_color = tc
+            if bsm.state == BS.DONE_FIRST:
+                t_color = _C_BRAND
+            
+            # 개발 모드일 때는 겹치지 않게 타이머 크기 조절
+            f_timer = self._fonts["label"] if self.dev_mode else self._fonts["card_timer"]
+            time_surf = f_timer.render(bsm.status_label, True, t_color)
+            self._screen.blit(time_surf, (x + 8, y + 32))
 
-        # RMS hint
-        hint = f"RMS {bsm.current_angle:.2f}" if bsm.current_angle is not None else "대기"
-        hint_surf = self._fonts["small"].render(hint, True, tc)
-        self._screen.blit(hint_surf, (x + 4, y + 42))
+        # --- 4. 개발자 모드 전용 RMS 수치 오버레이 (일반 모드는 완전 격리) ---
+        if self.dev_mode:
+            rms_val = bsm.current_angle
+            rms_text = f"RMS: {rms_val:.3f}" if rms_val is not None else "RMS: -"
+            rms_surf = self._fonts["small"].render(rms_text, True, tc)
+            self._screen.blit(rms_surf, (x + 8, y + 49))
 
-        # 진동 게이지
-        gauge_x, gauge_y = x + 4, y + 56
-        gauge_w, gauge_h = w - 8, 4
-        pygame.draw.rect(self._screen, (40, 40, 40), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=2)
+        # --- 5. 진동 게이지 (슬림하고 예쁜 라운드 게이지바) ---
+        gauge_x, gauge_y = x + 8, y + 68
+        gauge_w, gauge_h = w - 18, 4
+        pygame.draw.rect(self._screen, (30, 30, 35), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=2)
         score = max(0.0, min(1.0, bsm.vibration_score))
         if score > 0:
             fill_color = _C_SUCCESS if score < 1.0 else _C_WARNING_BG
             pygame.draw.rect(self._screen, fill_color,
                              (gauge_x, gauge_y, int(gauge_w * score), gauge_h), border_radius=2)
 
-        # 하단 버튼
-        from core.state_machine import BurnerState as BS
+        # --- 6. 하단 버튼 영역 (버튼 크기 리스케일로 침범 제거) ---
         if bsm.state in (BS.EMPTY, BS.POT_IDLE): start_label = "시작"
         elif bsm.state == BS.POT_STEAMING_FIRST: start_label = "완료"
-        elif bsm.state == BS.DONE_FIRST: start_label = "건너뜀"
+        elif bsm.state == BS.DONE_FIRST: start_label = "바로 재벌"
         elif bsm.state == BS.WAIT_SECOND: start_label = "재벌"
         elif bsm.state == BS.POT_STEAMING_SECOND: start_label = "완료"
         else: start_label = "시작"
 
-        bw = (w - 10) // 2
-        bh = 18
-        by = y + h - bh - 4
+        bw = (w - 18) // 2
+        bh = 20
+        by = y + h - bh - 6
 
-        btn_r = pygame.Rect(x + 3, by, bw, bh)
-        btn_s = pygame.Rect(x + 3 + bw + 4, by, bw, bh)
+        btn_r = pygame.Rect(x + 8, by, bw, bh)
+        btn_s = pygame.Rect(x + 8 + bw + 4, by, bw, bh)
 
         self._reset_rects[bid] = btn_r
         self._start_rects[bid] = btn_s
 
         hold_prog = min(1.0, (time.monotonic() - self._reset_hold[bid]) / _RESET_HOLD_S) if bid in self._reset_hold else 0.0
 
-        self._draw_btn(btn_r, "R", (80, 80, 90), hold_prog)
-        self._draw_btn(btn_s, f"{start_label}(S)" if selected else start_label, _C_SUCCESS)
+        # 버튼 색상 조화
+        btn_s_color = _C_SUCCESS
+        if bsm.state == BS.DONE_FIRST:
+            btn_s_color = (253, 126, 20)  # 세련된 오렌지
+
+        self._draw_btn(btn_r, "R", (70, 70, 75), hold_prog)
+        self._draw_btn(btn_s, f"{start_label}(S)" if selected else start_label, btn_s_color)
 
     def _draw_btn(self, rect: pygame.Rect, text: str, color, hold=0.0):
         pygame.draw.rect(self._screen, color, rect, border_radius=4)
@@ -894,8 +1140,19 @@ def _load_fonts() -> dict:
         "/System/Library/Fonts/AppleSDGothicNeo.ttc", "/Library/Fonts/NanumGothic.ttf"
     ]
     font_path = next((p for p in candidates if os.path.exists(p)), None)
-    def mk(size):
-        return pygame.font.Font(font_path, size) if font_path else pygame.font.Font(None, size + 4)
+    def mk(size, bold=False):
+        f = pygame.font.Font(font_path, size) if font_path else pygame.font.Font(None, size + 4)
+        if bold:
+            f.set_bold(True)
+        return f
     return {
-        "title": mk(22), "id": mk(20), "label": mk(18), "timer": mk(26), "btn": mk(14), "small": mk(13)
+        "title": mk(22, bold=True),
+        "id": mk(18),
+        "label": mk(16),
+        "timer": mk(26, bold=True),
+        "btn": mk(13),
+        "small": mk(13),
+        "card_num": mk(20, bold=True),
+        "card_timer": mk(22, bold=True),
+        "card_status": mk(18, bold=True)
     }

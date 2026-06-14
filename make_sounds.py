@@ -67,6 +67,10 @@ def main() -> None:
     _save("assets/sounds/complete.wav", _sequence([
         (784.0, 0.16), (1046.5, 0.16), (1318.5, 0.16), (1568.0, 0.55),
     ]))
+    # 카메라 연결 끊김 경고음 — 3회 반복되는 낮은 경고음 (E4 330Hz)
+    _save("assets/sounds/cam_lost.wav", _sequence([
+        (330.0, 0.25), (0.0, 0.1), (330.0, 0.25), (0.0, 0.1), (330.0, 0.4)
+    ]))
 
 
 if __name__ == "__main__":

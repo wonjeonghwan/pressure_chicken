@@ -5,20 +5,14 @@
     {
       "id": 5,
       "type": "camera",
-      "index": 1,
+      "index": 0,
       "label": "Cam-5"
     },
     {
       "id": 6,
       "type": "camera",
-      "index": 2,
+      "index": 1,
       "label": "Cam-6"
-    },
-    {
-      "id": 7,
-      "type": "camera",
-      "index": 0,
-      "label": "Cam-7"
     }
   ],
   "ui": {
@@ -79,10 +73,10 @@
       "done_first_timeout": 600,
       "pot_absent_threshold": 30,
       "roi": [
-        225,
-        393,
-        637,
-        496
+        43,
+        64,
+        92,
+        79
       ]
     },
     {
@@ -93,10 +87,10 @@
       "done_first_timeout": 600,
       "pot_absent_threshold": 30,
       "roi": [
-        561,
-        66,
-        496,
-        438
+        254,
+        130,
+        117,
+        101
       ]
     },
     {
@@ -107,10 +101,10 @@
       "done_first_timeout": 600,
       "pot_absent_threshold": 30,
       "roi": [
-        853,
-        407,
-        390,
-        389
+        112,
+        228,
+        92,
+        91
       ]
     },
     {
@@ -121,178 +115,10 @@
       "done_first_timeout": 600,
       "pot_absent_threshold": 30,
       "roi": [
-        1026,
-        159,
-        336,
-        332
-      ]
-    },
-    {
-      "id": 5,
-      "source_id": 5,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1190,
-        429,
-        327,
-        283
-      ]
-    },
-    {
-      "id": 6,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1176,
-        61,
-        261,
-        270
-      ]
-    },
-    {
-      "id": 7,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        946,
-        141,
-        314,
-        327
-      ]
-    },
-    {
-      "id": 8,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1251,
-        274,
-        284,
-        345
-      ]
-    },
-    {
-      "id": 9,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1004,
-        420,
-        340,
-        354
-      ]
-    },
-    {
-      "id": 10,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1300,
-        592,
-        385,
-        447
-      ]
-    },
-    {
-      "id": 11,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        322,
-        552,
-        350,
-        434
-      ]
-    },
-    {
-      "id": 12,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        663,
-        455,
-        314,
-        350
-      ]
-    },
-    {
-      "id": 13,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        442,
-        283,
-        279,
-        362
-      ]
-    },
-    {
-      "id": 14,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        707,
-        221,
-        283,
-        278
-      ]
-    },
-    {
-      "id": 15,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        548,
-        141,
-        217,
-        248
-      ]
-    },
-    {
-      "id": 16,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 30,
-      "roi": [
-        752,
-        66,
-        234,
-        190
+        231,
+        371,
+        97,
+        69
       ]
     }
   ],
