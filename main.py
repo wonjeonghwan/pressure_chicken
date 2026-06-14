@@ -119,7 +119,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
             b.get("countdown_first", 720),
             b.get("countdown_second", 300),
             b.get("done_first_timeout", 600),
-            b.get("pot_absent_threshold", 60),
+            b.get("pot_absent_threshold", 30),
         )
         burner_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
 
@@ -209,7 +209,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
         new_registry = BurnerRegistry()
         new_meta = {}
         for b in burners_cfg:
-            new_registry.add(b["id"], b.get("countdown_first", 720), b.get("countdown_second", 300), b.get("done_first_timeout", 600), b.get("pot_absent_threshold", 60))
+            new_registry.add(b["id"], b.get("countdown_first", 720), b.get("countdown_second", 300), b.get("done_first_timeout", 600), b.get("pot_absent_threshold", 30))
             new_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
             
         display._registry = new_registry

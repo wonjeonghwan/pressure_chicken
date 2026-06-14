@@ -16,10 +16,15 @@
 ### 타이머 사이클
 ```
 밥솥 올라옴 → 딸랑이 감지 → 초벌 12분 시작
-초벌 완료 → 딸랑이 재감지 → 재벌 5분 시작
+초벌 완료 → DONE_FIRST(냉각, 진동 무시) → done_first_timeout(기본 10분) 경과 → 재벌 대기
+재벌 대기(WAIT_SECOND, 진동 재활성) → 딸랑이 재감지 → 재벌 5분 시작
 재벌 완료 → 경보
 밥솥 이탈 (어느 단계든) → 전체 리셋 → 새 사이클
 ```
+
+> **냉각 단계(DONE_FIRST)의 의미**: 초벌 완료 직후에는 잔여 진동이 남아 있어 곧바로
+> "재벌 시작"으로 오인할 수 있다. 그래서 완료 후 `done_first_timeout` 동안은 진동을
+> 무시하고(DONE_FIRST), 시간이 지나야 `WAIT_SECOND`로 넘어가 진동 감지를 재활성한다.
 
 ### 타이머 잠금
 - 타이머 진행 중에는 카메라 감지 결과로 상태가 자동 변경되지 않음
@@ -28,16 +33,35 @@
 
 ---
 
-## 화구 상태 정의 (6개)
+## 화구 상태 정의 (7개)
 
-| 상태 | 설명 | UI 색상 |
-|------|------|---------|
-| `EMPTY` | 빈 화구 (밥솥 미감지) | 회색 |
-| `POT_IDLE` | 밥솥 감지, 대기 중 | 파란색 |
-| `POT_STEAMING_FIRST` | 초벌 12분 타이머 진행 중 | 초록색 |
-| `DONE_FIRST` | 초벌 완료, 재벌 딸랑이 대기 | 노란색 |
-| `POT_STEAMING_SECOND` | 재벌 5분 타이머 진행 중 | 진한 초록 |
-| `DONE_SECOND` | 재벌 완료, 경보 | 빨간색 점멸 |
+| 상태 | 설명 | 진동 감지 | UI 색상 (RGB) |
+|------|------|-----------|---------------|
+| `EMPTY` | 빈 화구 (밥솥 미감지) | — | 회색 `(80,80,80)` |
+| `POT_IDLE` | 밥솥 감지, 대기 중 | 활성 | 브랜드 옐로우 `(255,192,0)` |
+| `POT_STEAMING_FIRST` | 초벌 12분 타이머 진행 중 | 🔒 잠금 | 초록 `(60,180,60)` |
+| `DONE_FIRST` | 초벌 완료, 냉각 중 (진동 무시, timeout 후 자동 전환) | ❌ 무시 | 오렌지 `(255,140,0)` |
+| `WAIT_SECOND` | 재벌 대기 (진동 재활성) | 활성 | 파랑 `(100,160,220)` |
+| `POT_STEAMING_SECOND` | 재벌 5분 타이머 진행 중 | 🔒 잠금 | 진초록 `(30,130,30)` |
+| `DONE_SECOND` | 재벌 완료, 경보 (pot 이탈 시만 EMPTY) | — | 빨강 점멸 `(220,40,40)` |
+
+**상태 전환 규칙**
+```
+EMPTY → POT_IDLE              : pot_body 감지
+POT_IDLE → STEAMING_FIRST     : 딸랑이 진동 확정
+STEAMING_FIRST → DONE_FIRST   : 초벌 타이머 완료
+DONE_FIRST → WAIT_SECOND      : done_first_timeout 경과 + pot 존재
+DONE_FIRST → EMPTY            : pot 이탈
+WAIT_SECOND → STEAMING_SECOND : 딸랑이 진동 확정
+WAIT_SECOND → EMPTY           : pot 이탈
+STEAMING_SECOND → DONE_SECOND : 재벌 타이머 완료
+DONE_SECOND → EMPTY           : pot 이탈 (최종 상태)
+```
+
+> **pot 이탈 판정(`pot_absent_threshold`)**: 완료 계열 상태(DONE_FIRST / WAIT_SECOND /
+> DONE_SECOND)에서 밥솥을 **연속 N프레임(기본 30, ~30fps 기준 약 1초)** 못 봐야
+> "치워짐 → EMPTY"로 확정한다. 김·손·행주에 순간 가려도 타이머를 날리지 않기 위한
+> debounce 값. EMPTY 전환 시 내부 타이머 상태도 함께 초기화(`_reset_timer`)된다.
 
 ---
 
@@ -216,10 +240,12 @@ dependencies = [
     "window_size": [1280, 720]
   },
   "optical_flow": {
-    "rms_threshold": 0.5,
+    "rms_threshold": 0.20,
     "rms_ema_alpha": 0.35,
     "window_frames": 25,
-    "trigger_frames": 14
+    "trigger_frames": 14,
+    "normalize_rms": true,
+    "normalize_ref_diag": 40.0
   },
   "frequency": {
     "enabled": false
@@ -229,7 +255,8 @@ dependencies = [
     "confidence": 0.5
   },
   "burners": [
-    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "grid_pos": [0, 0]}
+    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300,
+     "done_first_timeout": 600, "pot_absent_threshold": 30, "grid_pos": [0, 0]}
   ]
 }
 ```

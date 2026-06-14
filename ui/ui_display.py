@@ -422,7 +422,7 @@ class UIDisplay:
                         "countdown_first": 720,
                         "countdown_second": 300,
                         "done_first_timeout": 600,
-                        "pot_absent_threshold": 60,
+                        "pot_absent_threshold": 30,
                         "roi": roi
                     })
             self._calib_drag_start = None

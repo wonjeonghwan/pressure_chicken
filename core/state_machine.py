@@ -59,7 +59,7 @@ class BurnerStateMachine:
         countdown_first: int,
         countdown_second: int,
         done_first_timeout: int = 600,
-        pot_absent_threshold: int = 60,
+        pot_absent_threshold: int = 30,
     ):
         self.burner_id   = burner_id
         self._cd_first   = countdown_first
@@ -111,7 +111,7 @@ class BurnerStateMachine:
             if not pot_present:
                 self._pot_absent_count += 1
                 if self._pot_absent_count >= self._pot_absent_threshold:
-                    self._pot_absent_count = 0
+                    self._reset_timer()
                     self.state = BurnerState.EMPTY
             else:
                 self._pot_absent_count = 0
@@ -123,7 +123,7 @@ class BurnerStateMachine:
             if not pot_present:
                 self._pot_absent_count += 1
                 if self._pot_absent_count >= self._pot_absent_threshold:
-                    self._pot_absent_count = 0
+                    self._reset_timer()
                     self.state = BurnerState.EMPTY
             else:
                 self._pot_absent_count = 0
@@ -140,7 +140,7 @@ class BurnerStateMachine:
             if not pot_present:
                 self._pot_absent_count += 1
                 if self._pot_absent_count >= self._pot_absent_threshold:
-                    self._pot_absent_count = 0
+                    self._reset_timer()
                     self.state = BurnerState.EMPTY
             else:
                 self._pot_absent_count = 0
@@ -157,7 +157,7 @@ class BurnerStateMachine:
         수동 타이머 강제 시작/진행.
         EMPTY / POT_IDLE               → 초벌 시작
         POT_STEAMING_FIRST             → 초벌 즉시 완료
-        DONE_FIRST                     → 대기 시간 스킵 → WAIT_SECOND
+        DONE_FIRST                     → 냉각 대기 스킵하고 '바로 재벌' 즉시 시작
         WAIT_SECOND                    → 재벌 강제 시작
         POT_STEAMING_SECOND            → 재벌 즉시 완료
         """
@@ -166,8 +166,9 @@ class BurnerStateMachine:
         elif self.state == BurnerState.POT_STEAMING_FIRST:
             self._countdown_end = time.monotonic()
         elif self.state == BurnerState.DONE_FIRST:
+            # '바로 재벌' — 10분 냉각 대기를 건너뛰고 곧장 재벌 카운트다운 시작
             self._done_first_end = None
-            self.state = BurnerState.WAIT_SECOND
+            self._start_second()
         elif self.state == BurnerState.WAIT_SECOND:
             self._start_second()
         elif self.state == BurnerState.POT_STEAMING_SECOND:
@@ -204,6 +205,23 @@ class BurnerStateMachine:
     def remaining_display(self) -> str:
         s = int(self.remaining_seconds)
         return f"{s // 60:02d}:{s % 60:02d}"
+
+    @property
+    def seconds_since_done(self) -> float:
+        """카운트다운(초벌·재벌) 종료 후 경과 초. 완료 시각이 없으면 -1.
+
+        UI 유동 정렬에서 '완료 직후 N초 동안 상단 강조 유지' 판정에 사용.
+        _done_time은 STEAMING_FIRST/SECOND 완료 순간에 기록되고,
+        새 카운트다운(_start_first/_start_second) 시작 시 None으로 리셋된다.
+        """
+        if self._done_time is None:
+            return -1.0
+        return time.monotonic() - self._done_time
+
+    @property
+    def is_counting(self) -> bool:
+        """카운트다운 진행 중(초벌·재벌) 여부 — UI 유동 정렬 1순위 판정용."""
+        return self.state in _STEAMING
 
     @property
     def phase_label(self) -> str:

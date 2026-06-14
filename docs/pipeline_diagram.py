@@ -146,7 +146,7 @@ box(52, 50, 46, 24, COL_STATE, '⑥ Burner State Machine',
      '★잠금 :  타이머 중에는 감지 결과로 자동 전환 X',
      '          수동 R(리셋) / S(강제시작)만 허용',
      '',
-     'pot_absent_threshold = 60 프레임 → EMPTY 전환',
+     'pot_absent_threshold = 30 프레임 → EMPTY 전환',
      'STATE_COLORS = UI 카드 색상 매핑 7종'],
     body_size=8.5)
 

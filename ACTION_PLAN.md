@@ -1,6 +1,56 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-06-04 (다카메라 UX 통합 + 매장 배포 준비 완료) | 현재 단계: 매장 노트북 1차 테스트 대기
+> 최종 업데이트: 2026-06-15 (바로재벌·알림음·백엔드 검증 완료) | 현재 단계: UI 작업(0612UI작업.md) 위임 → 매장 1차 테스트
+
+---
+
+## 2026-06-15 백엔드 검증 결과 (ALL PASS)
+
+상태머신 변경(바로재벌 · 신규 property · pot_absent 30 통일 · EMPTY 정리)을 단위 검증. **12개 항목 전부 PASS.**
+
+| 검증 항목 | 결과 |
+|----------|------|
+| '바로 재벌': DONE_FIRST에서 `manual_start()` → 즉시 `POT_STEAMING_SECOND`, 재벌 카운트다운 시작 | ✅ |
+| `is_counting`: STEAMING 중 True / 정지 상태 False | ✅ |
+| `seconds_since_done`: STEAMING 중 −1 / 완료 후 ≥0 | ✅ |
+| `pot_absent_threshold` 기본값 30 | ✅ |
+| `DONE_SECOND` 이탈(연속 미감지) → EMPTY + `_reset_timer`로 타이머 필드 정리 | ✅ |
+| debounce: threshold 미만 순간 가림(10<30)은 상태 유지 | ✅ |
+
+검증 방식: `core.state_machine` 단위 호출(countdown=0으로 즉시 완료 시뮬). 1회성 검증이라 임시 스크립트는 보관하지 않음.
+알림음은 청취 검증 필요(주방 소음 환경에서 들리는지) — UI 재생 연결 후 현장에서 확인.
+
+---
+
+## 2026-06-14 작업 — 상태머신 정합성 정리 & 문서 동기화
+
+내부 로직 점검 중 발견한 정합성 문제 3건을 정리. 감지 알고리즘(Phase 1/2)은 무수정.
+
+### A. `pot_absent_threshold` 기본값 불일치 → 30으로 통일
+- **발견**: 기본값이 두 곳에서 어긋나 있었음 —
+  `BurnerStateMachine.__init__`=60 vs `BurnerRegistry.add`=30.
+- **실태**: `main.py`가 config 값(당시 전부 60)을 항상 명시 전달하므로 `add`의 `30`은
+  **한 번도 실행되지 않는 죽은 기본값**이었음. 코드 전체에서 30이 박힌 곳은 `add` 단 한 곳,
+  나머지(실동작·config 16화구·예제·docs)는 전부 60.
+- **결정**: **30으로 통일** (반응성 ~30fps 기준 약 1초; 기존 60은 약 2초).
+  → 완료 계열 상태에서 밥솥 이탈 후 EMPTY 복귀가 빨라짐 (실동작 변경 사항).
+- **변경 파일**: `state_machine.py`(`__init__` 60→30), `main.py`(초기화·핫리로드 2곳),
+  `ui/ui_display.py`(캘리브 신규 화구), `tests/sim_camera_select.py`,
+  `config/store_config.json`(16화구), `config/examples/store_4cam_video_with_burners.json`(8화구),
+  `docs/pipeline_diagram.py`.
+
+### B. EMPTY 전환 시 타이머 상태 미정리 → `_reset_timer()` 호출로 수정
+- **문제**: DONE_FIRST / WAIT_SECOND / DONE_SECOND → EMPTY 전환 시 `_pot_absent_count`만
+  0으로 리셋하고 `_done_first_end` 등 내부 타이머 필드는 stale 값으로 남았음.
+- **조치**: 세 전환 지점 모두 `_reset_timer()` 호출로 변경 (count·countdown_end·done_time·done_first_end 일괄 정리).
+  현재는 화면 표시 버그로 이어지진 않았으나(EMPTY에서 해당 필드 미참조) 잠재 위험 제거.
+
+### C. 문서 7상태 동기화 (`CLAUDE.md`)
+- 코드는 이미 **7상태**(WAIT_SECOND 포함)인데 CLAUDE.md는 구버전 6상태 표를 유지하고 있었음.
+- 상태 정의 표를 7상태로 갱신 + 실제 색상 RGB·진동 감지 활성 여부 명기.
+- 타이머 사이클에 **DONE_FIRST 냉각 단계**(완료 직후 잔여 진동 무시 → done_first_timeout 후 WAIT_SECOND) 설명 추가.
+- 상태 전환 규칙 표·`pot_absent_threshold` 설명 추가.
+- `store_config.json` 예시 보강: `done_first_timeout`, `pot_absent_threshold`(30), `normalize_rms`/`normalize_ref_diag` 추가, `rms_threshold` 0.5→0.20 동기화.
 
 ---
 
@@ -156,6 +206,13 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 | 2026-05-05 | core/optical_flow.py | **RMS 정규화 방식 확정** — `norm_rms = raw_rms × ref_diag / bbox_diag`. 이전 방식(`/sqrt(w×h)`) 대비: ① 스케일 유지 — ref_diag로 다시 곱해 값이 0으로 수렴(상쇄)하지 않음. ② threshold 불변 — bbox 크기가 바뀌어도 0.20 그대로 사용. ③ 해상도/줌 독립 — 해상도 2배 → bbox 2배 → scale 0.5 → 보정됨. `bbox_diag` 계산을 jump 감지 블록 밖으로 이동해 항상 사용 가능하게 함. |
 | 2026-05-05 | diag_rms.py | **bbox_d, norm_rms 컬럼 추가** — 화구별 실제 bbox 대각선과 정규화 후 RMS를 나란히 표시. 판정 기준도 normalize 설정에 따라 deform_rms ↔ norm_rms 자동 전환. old_rms 컬럼 제거. |
 | 2026-05-05 | config/store_config.json | **rms_threshold 0.20 확정, normalize 옵션 추가** — 500프레임 정지 영상 분석 결과: noise p90=0.19. threshold 0.20 채택. `normalize_rms: true`, `normalize_ref_diag: 40.0` 추가. 이전 threshold 0.6은 정지 noise 최댓값(0.59)과 거의 같아 실질적으로 감지 불가였음. |
+| 2026-06-14 | state_machine.py 외 7파일 | **pot_absent_threshold 기본값 30 통일** — `BurnerRegistry.add`=30 vs `__init__`=60 불일치. add의 30은 main.py가 config값을 항상 전달해 미사용(죽은 기본값)이었음. 반응성(~1초)을 위해 30으로 통일, 실동작 60→30 변경. config 16화구·예제·docs 일괄 반영. |
+| 2026-06-14 | core/state_machine.py | **EMPTY 전환 시 `_reset_timer()` 호출** — DONE_FIRST/WAIT_SECOND/DONE_SECOND → EMPTY 전환에서 `_pot_absent_count`만 리셋하고 `_done_first_end` 등은 stale로 남던 문제. 세 지점 모두 `_reset_timer()`로 일괄 정리. |
+| 2026-06-14 | CLAUDE.md | **문서 7상태 동기화** — 코드는 이미 WAIT_SECOND 포함 7상태인데 문서는 6상태 구버전 유지. 상태표(색상 RGB·진동 활성)·전환 규칙·DONE_FIRST 냉각 단계 설명·config 예시(done_first_timeout/pot_absent_threshold/normalize, rms 0.5→0.20) 갱신. |
+| 2026-06-15 | core/state_machine.py | **manual_start의 DONE_FIRST → '바로 재벌'** — 기존 '건너뜀'(WAIT_SECOND 점프)에서 즉시 `_start_second()`(재벌 카운트다운 시작)로 변경. 초벌 완료 후 곧장 이어 조리하는 경우 10분 냉각 대기를 수동으로 건너뛰기 위함. (UI 버튼 라벨 "건너뜀"→"바로 재벌"은 0612UI작업.md로 위임) |
+| 2026-06-15 | core/state_machine.py | **seconds_since_done / is_counting property 추가** — UI 유동 정렬(카운트다운 임박순 상단 + 완료 직후 N초 강조)용 조회 인터페이스. 상태 로직 변경 없음. |
+| 2026-06-15 | make_sounds.py, assets/sounds/ | **알림음 합성·음량 강화** — 초벌·재벌 공통 2시점(완료 30초 전 / 완료)용 `warn_30s`(2회 비프+상승)·`complete`(4음 팡파레) wav. 주방 소음 대응: 2·3배음 혼합 + sustain 엔벨로프 + 음량 0.9. 외부 음원·인터넷 불필요. 재생 연결은 UI 작업(0612UI작업.md 작업E). |
+| 2026-06-15 | 0612UI작업.md | **UI 개선 명세서 작성** — UI 작업을 별도 모델/세션에서 수행하기 위한 단독 문서. 항목 A~F(번호 확대·재벌대기 중복 제거·RMS dev전용·바로재벌 버튼·알림음·유동정렬) + 의존할 백엔드 API/상태 컨텍스트 + 테스트 체크리스트. |
 
 ---
 

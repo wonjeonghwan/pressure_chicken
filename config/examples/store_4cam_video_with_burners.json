@@ -21,13 +21,13 @@
   "frequency": {"enabled": false},
   "model": {"weights": "models/pot_seg.pt", "confidence": 0.4},
   "burners": [
-    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
-    {"id": 2, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
-    {"id": 3, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
-    {"id": 4, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
-    {"id": 5, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
-    {"id": 6, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]},
-    {"id": 7, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [200, 200, 400, 400]},
-    {"id": 8, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 60, "roi": [700, 200, 400, 400]}
+    {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [200, 200, 400, 400]},
+    {"id": 2, "source_id": 0, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [700, 200, 400, 400]},
+    {"id": 3, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [200, 200, 400, 400]},
+    {"id": 4, "source_id": 1, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [700, 200, 400, 400]},
+    {"id": 5, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [200, 200, 400, 400]},
+    {"id": 6, "source_id": 2, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [700, 200, 400, 400]},
+    {"id": 7, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [200, 200, 400, 400]},
+    {"id": 8, "source_id": 3, "countdown_first": 720, "countdown_second": 300, "done_first_timeout": 600, "pot_absent_threshold": 30, "roi": [700, 200, 400, 400]}
   ]
 }
