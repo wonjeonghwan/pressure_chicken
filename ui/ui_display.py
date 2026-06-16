@@ -33,9 +33,10 @@ _C_NO_FRAME    = (220, 170, 30)  # 연결됐으나 프레임 없음 — 주황
 _C_FAILED      = (200, 60, 60)   # 열기 실패 — 빨강
 
 _PAD = 8
-_RIGHT_PANEL_W = 400
 _RESET_HOLD_S  = 1.0
 _CELL_GAP      = 4               # 그리드 셀 간 여백
+_HALF_CELL_ASPECT = 0.7           # half_cell_h = half_cell_w * 이 값
+_DEFAULT_CAM_SIZE = [8, 7]        # 카메라 박스 기본 크기 (half-cell rows, cols)
 
 class UIDisplay:
     """단일 통합 Pygame 대시보드"""
@@ -90,6 +91,25 @@ class UIDisplay:
         self._calib_burners = []
         self._calib_selected_idx: int | None = None  # 선택된 화구 인덱스
 
+        # 통합 캔버스 배치 모드 — 카메라 박스 + 화구 카드를 반칸(half-cell) 단위 그리드에 자유 배치
+        self.layout_mode = False
+        self._layout_cols: int = int(self._cfg.get("layout_cols", 16))  # 반칸 단위 전체 열 수
+        self._layout_positions: dict[int, list[int]] = {}         # bid → [row, col] (화구 작업본)
+        self._layout_camera_positions: dict[int, list[int]] = {}  # source_id → [row, col] (카메라 작업본)
+        self._layout_camera_sizes: dict[int, list[int]] = {}      # source_id → [rows, cols] (카메라 크기 작업본)
+        self._layout_drag_kind: str | None = None   # 'burner' | 'camera' | 'resize'
+        self._layout_drag_id: int | None = None
+        self._layout_drag_pos: tuple[int, int] = (0, 0)
+        self._layout_drag_offset: tuple[int, int] = (0, 0)  # 클릭 지점 - 오브젝트 좌측상단 (그랩 오프셋)
+        self._layout_btn_rect: pygame.Rect | None = None
+        self._cam_box_rects: dict[int, pygame.Rect] = {}       # source_id → 카메라 박스 전체 rect (드래그용)
+        self._cam_resize_handles: dict[int, pygame.Rect] = {}  # source_id → 리사이즈 핸들 rect (배치모드)
+
+        # 캔버스(영상+카드 통합 영역) 좌표계 — 매 렌더마다 갱신
+        self._canvas_origin: tuple[int, int] = (0, 0)
+        self._half_cell_w: int = 0
+        self._half_cell_h: int = 0
+
         # 외부 콜백
         self.on_camera_switch = None
         self.on_config_reloaded = None
@@ -108,16 +128,18 @@ class UIDisplay:
         self._sound_warn_30s = None
         self._sound_complete = None
         self._sound_cam_lost = None
+        self._sound_numbers: dict[int, object] = {}     # 화구 번호(1~30) 안내음
+        self._announce_channel = None                    # 번호+상태 안내음 전용 예약 채널
+        self._announce_queue: list = []                  # 순차 재생 대기열 (Sound 객체)
+        self._open_status: str | None = None              # 상태어를 아직 안 붙인 진행 중 배치("warn30"/"done")
         self._prev_remaining: dict[int, float] = {}
         self._prev_states: dict[int, BurnerState] = {}
         self._cam_offline_since: dict[int, float] = {}
         self._cam_lost_played: dict[int, bool] = {}
         self._sorted_burners_cache = []
 
-        # 작업 G — 패널 가시성 조정
-        self._right_panel_w: int = self._cfg.get("right_panel_w", _RIGHT_PANEL_W)
+        # 카메라 박스 표시 토글 (V) — 끄면 카메라 없이 화구 카드만
         self._video_hidden: bool = False
-        self._dragging_divider: bool = False
         # 카메라 풀뷰(단독 확대) — 영상 더블클릭으로 토글
         self._focus_camera_id: int | None = None
         self._last_click_src: int | None = None
@@ -133,29 +155,28 @@ class UIDisplay:
         pygame.display.set_caption("길가옆에 압력밥솥 타이머 시스템")
         self._clock = pygame.time.Clock()
         self._fonts = _load_fonts()
+        self._font_path = _resolve_font_path()
+        self._font_cache: dict[int, pygame.font.Font] = {}
 
         # Pygame 오디오 믹서 초기화 (사운드 에셋 로드)
         try:
             pygame.mixer.init()
-            sound_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sounds")
-            w_path = os.path.join(sound_dir, "warn_30s.wav")
-            c_path = os.path.join(sound_dir, "complete.wav")
-            l_path = os.path.join(sound_dir, "cam_lost.wav")
-            
-            # 절대경로 폴백 지원
-            if not os.path.exists(w_path):
-                w_path = "assets/sounds/warn_30s.wav"
-            if not os.path.exists(c_path):
-                c_path = "assets/sounds/complete.wav"
-            if not os.path.exists(l_path):
-                l_path = "assets/sounds/cam_lost.wav"
+            # 채널 0번을 예약 → 번호+상태 안내음 전용. 자동할당(.play())이 가져가지 않도록 보호
+            pygame.mixer.set_reserved(1)
+            self._announce_channel = pygame.mixer.Channel(0)
 
-            if os.path.exists(w_path):
-                self._sound_warn_30s = pygame.mixer.Sound(w_path)
-            if os.path.exists(c_path):
-                self._sound_complete = pygame.mixer.Sound(c_path)
-            if os.path.exists(l_path):
-                self._sound_cam_lost = pygame.mixer.Sound(l_path)
+            sound_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sounds")
+
+            def _load(name: str):
+                path = os.path.join(sound_dir, name)
+                if not os.path.exists(path):
+                    path = os.path.join("assets", "sounds", name)
+                return pygame.mixer.Sound(path) if os.path.exists(path) else None
+
+            self._sound_warn_30s = _load("30초+전.mp3")
+            self._sound_complete = _load("완료.mp3")
+            self._sound_cam_lost = _load("cam_lost.wav")
+            self._sound_numbers  = {n: s for n in range(1, 31) if (s := _load(f"{n}번.mp3")) is not None}
             print("[UI] pygame.mixer 사운드 로드 성공")
         except Exception as e:
             print(f"[UI] pygame.mixer 초기화 실패 (무음 작동): {e}")
@@ -237,6 +258,121 @@ class UIDisplay:
             target_idx += step
         return False
 
+    # ── 통합 캔버스 배치 모드 (카메라 박스 + 화구 카드, 반칸 단위) ──────────
+    # 화구 카드 = 2×2 반칸 고정 크기. 카메라 박스 = source별 layout_size (반칸 단위).
+    def _default_grid_pos(self, bid: int) -> list[int]:
+        """grid_pos 미지정 화구의 기본 위치 — 등장 순서로 2반칸씩 가로로 배치."""
+        burners = self.config_data.get("burners", [])
+        idx = next((i for i, b in enumerate(burners) if b["id"] == bid), 0)
+        cols_per_row = max(1, self._layout_cols // 2)
+        row_group = idx // cols_per_row
+        idx_in_row = idx % cols_per_row
+        return [row_group * 2, idx_in_row * 2]
+
+    def _burner_grid_pos(self, bid: int) -> list[int]:
+        cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
+        if cfg and "grid_pos" in cfg:
+            r, c = cfg["grid_pos"]
+            return [int(r), int(c)]
+        return self._default_grid_pos(bid)
+
+    def _camera_layout_size(self, src_id: int) -> list[int]:
+        sc = next((s for s in self.config_data.get("sources", []) if s["id"] == src_id), None)
+        if sc and "layout_size" in sc:
+            r, c = sc["layout_size"]
+            return [int(r), int(c)]
+        return list(_DEFAULT_CAM_SIZE)
+
+    def _default_camera_pos(self, src_id: int) -> list[int]:
+        """layout_pos 미지정 카메라 기본 위치 — 화구 영역 아래쪽에 가로로 배치."""
+        sources = self.config_data.get("sources", [])
+        idx = next((i for i, s in enumerate(sources) if s["id"] == src_id), 0)
+        cam_w = _DEFAULT_CAM_SIZE[1]
+        base_row = 8  # 화구 기본 배치 영역(약 4줄) 아래 여유
+        return [base_row, idx * cam_w]
+
+    def _camera_layout_pos(self, src_id: int) -> list[int]:
+        sc = next((s for s in self.config_data.get("sources", []) if s["id"] == src_id), None)
+        if sc and "layout_pos" in sc:
+            r, c = sc["layout_pos"]
+            return [int(r), int(c)]
+        return self._default_camera_pos(src_id)
+
+    def start_layout_mode(self) -> None:
+        self.layout_mode = True
+        self._layout_positions = {
+            bsm.burner_id: self._burner_grid_pos(bsm.burner_id)
+            for bsm in self._registry.all()
+        }
+        self._layout_camera_positions = {
+            sc["id"]: self._camera_layout_pos(sc["id"])
+            for sc in self.config_data.get("sources", [])
+        }
+        self._layout_camera_sizes = {
+            sc["id"]: self._camera_layout_size(sc["id"])
+            for sc in self.config_data.get("sources", [])
+        }
+        self._layout_drag_kind = None
+        self._layout_drag_id = None
+        self._selected_id = None
+        print("[UI] 배치 모드 시작")
+
+    def cancel_layout_mode(self) -> None:
+        self.layout_mode = False
+        self._layout_drag_kind = None
+        self._layout_drag_id = None
+
+    def save_layout(self) -> None:
+        self.layout_mode = False
+        self._layout_drag_kind = None
+        self._layout_drag_id = None
+        for b in self.config_data.get("burners", []):
+            pos = self._layout_positions.get(b["id"])
+            if pos is not None:
+                b["grid_pos"] = [int(pos[0]), int(pos[1])]
+        for sc in self.config_data.get("sources", []):
+            pos = self._layout_camera_positions.get(sc["id"])
+            if pos is not None:
+                sc["layout_pos"] = [int(pos[0]), int(pos[1])]
+            size = self._layout_camera_sizes.get(sc["id"])
+            if size is not None:
+                sc["layout_size"] = [int(size[0]), int(size[1])]
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(self.config_data, f, ensure_ascii=False, indent=2)
+        print("[UI] 배치 저장 완료")
+        if getattr(self, "on_config_reloaded", None):
+            self.on_config_reloaded(self.config_data)
+
+    def _layout_cell_at(self, pos: tuple[int, int]) -> tuple[int, int] | None:
+        """픽셀 좌표(좌측상단 기준 앵커) → (row, col) 반칸 그리드 좌표. 캔버스 원점/반칸크기 기준."""
+        if self._half_cell_w <= 0 or self._half_cell_h <= 0:
+            return None
+        gx, gy = self._canvas_origin
+        rel_x = max(0, pos[0] - gx)
+        rel_y = max(0, pos[1] - gy)
+        col = int(rel_x // self._half_cell_w)
+        row = int(rel_y // self._half_cell_h)
+        col = max(0, min(self._layout_cols - 1, col))
+        row = max(0, row)
+        return (row, col)
+
+    def _layout_drag_anchor(self) -> tuple[int, int]:
+        """드래그 중인 오브젝트의 좌측상단 앵커 픽셀 좌표 (그랩 오프셋 보정, 비스냅)."""
+        ox, oy = self._layout_drag_offset
+        return (self._layout_drag_pos[0] - ox, self._layout_drag_pos[1] - oy)
+
+    def _layout_resize_dims(self, src_id: int, drag_pos: tuple[int, int]) -> list[int]:
+        """카메라 박스 좌측상단 기준으로 drag_pos까지의 거리를 반칸 단위 (rows, cols)로 환산. 최소 2x2."""
+        if self._half_cell_w <= 0 or self._half_cell_h <= 0:
+            return list(self._camera_layout_size(src_id))
+        gx, gy = self._canvas_origin
+        row, col = self._layout_camera_positions.get(src_id, self._camera_layout_pos(src_id))
+        ox = gx + col * self._half_cell_w
+        oy = gy + row * self._half_cell_h
+        cols = max(2, round((drag_pos[0] - ox) / self._half_cell_w))
+        rows = max(2, round((drag_pos[1] - oy) / self._half_cell_h))
+        return [rows, cols]
+
     def _show_toast(self, msg: str, duration_s: float = 2.5) -> None:
         self._toast_msg = msg
         self._toast_until = time.monotonic() + duration_s
@@ -316,6 +452,14 @@ class UIDisplay:
                 self._move_selected_within_camera(+1)
             return False
 
+        if self.layout_mode:
+            # 배치 모드 전용 키
+            if key == pygame.K_RETURN or key == pygame.K_KP_ENTER:
+                self.save_layout()
+            elif key == pygame.K_ESCAPE:
+                self.cancel_layout_mode()
+            return False
+
         # 일반 운용 단축키
         if key == pygame.K_m:
             self.show_mask = not self.show_mask
@@ -331,6 +475,8 @@ class UIDisplay:
             self._focus_camera_id = None
         elif key == pygame.K_f:
             self.start_calibration()
+        elif key == pygame.K_l:
+            self.start_layout_mode()
         elif key == pygame.K_d:
             self.dev_mode = not self.dev_mode
         elif key == pygame.K_v:
@@ -374,6 +520,31 @@ class UIDisplay:
         return None
 
     def _on_mouse_down(self, pos: tuple[int, int]) -> None:
+        if self.layout_mode:
+            # 리사이즈 핸들 우선 확인 (카메라 박스 모서리)
+            for src_id, rect in self._cam_resize_handles.items():
+                if rect.collidepoint(pos):
+                    self._layout_drag_kind = 'resize'
+                    self._layout_drag_id = src_id
+                    self._layout_drag_pos = pos
+                    self._layout_drag_offset = (0, 0)
+                    return
+            for bid, rect in self._card_rects.items():
+                if rect.collidepoint(pos):
+                    self._layout_drag_kind = 'burner'
+                    self._layout_drag_id = bid
+                    self._layout_drag_pos = pos
+                    self._layout_drag_offset = (pos[0] - rect.x, pos[1] - rect.y)
+                    return
+            for src_id, rect in self._cam_box_rects.items():
+                if rect.collidepoint(pos):
+                    self._layout_drag_kind = 'camera'
+                    self._layout_drag_id = src_id
+                    self._layout_drag_pos = pos
+                    self._layout_drag_offset = (pos[0] - rect.x, pos[1] - rect.y)
+                    return
+            return
+
         if self.calibration_mode:
             v_pos = self._to_video_pos(pos)
             if v_pos:
@@ -406,17 +577,15 @@ class UIDisplay:
                 self._calib_selected_idx = None
             return
 
-        # 분할선 드래그 시작 (영상 표시 중일 때만, 다른 클릭보다 우선)
-        if not self._video_hidden and self._screen is not None:
-            divider_x = self._screen.get_width() - self._right_panel_w
-            if abs(pos[0] - divider_x) <= 6:
-                self._dragging_divider = True
-                return
-
         # 소리 토글 버튼 클릭 (px 영역 정의 필요하나 렌더링 때 저장해 둔 Rect 사용)
         if self._sound_rect and self._sound_rect.collidepoint(pos):
             self.mute = not self.mute
             self._show_toast("음소거 ON" if self.mute else "음소거 OFF")
+            return
+
+        # 배치 모드 버튼 클릭
+        if getattr(self, "_layout_btn_rect", None) and self._layout_btn_rect.collidepoint(pos):
+            self.start_layout_mode()
             return
 
         # 카메라 +/- 버튼
@@ -477,10 +646,8 @@ class UIDisplay:
             return
 
     def _on_mouse_move(self, pos: tuple[int, int]) -> None:
-        if self._dragging_divider and self._screen is not None:
-            sw = self._screen.get_width()
-            # 패널 폭 = 창 너비 - 마우스 x. MIN=300(카드 최소), MAX=sw(영상 0 = 카드 전체)
-            self._right_panel_w = max(300, min(sw, sw - pos[0]))
+        if self.layout_mode and self._layout_drag_kind is not None:
+            self._layout_drag_pos = pos
             return
         if self.calibration_mode and self._calib_dragging:
             v_pos = self._to_video_pos(pos)
@@ -489,11 +656,32 @@ class UIDisplay:
                 self._calib_drag_end = (v_pos[1], v_pos[2])
 
     def _on_mouse_up(self, pos: tuple[int, int]) -> None:
-        if self._dragging_divider:
-            self._dragging_divider = False
-            # 변경된 폭을 ui 설정에 기록(다음 캘리브 저장 시 함께 영구 저장됨)
-            self._cfg["right_panel_w"] = self._right_panel_w
+        if self.layout_mode and self._layout_drag_kind is not None:
+            if self._layout_drag_kind == 'resize':
+                sid = self._layout_drag_id
+                self._layout_camera_sizes[sid] = self._layout_resize_dims(sid, pos)
+            else:
+                ox, oy = self._layout_drag_offset
+                anchor = (pos[0] - ox, pos[1] - oy)
+                target = self._layout_cell_at(anchor)
+                if target is not None:
+                    if self._layout_drag_kind == 'burner':
+                        bid = self._layout_drag_id
+                        occupant = next(
+                            (b for b, p in self._layout_positions.items()
+                             if b != bid and tuple(p) == target),
+                            None,
+                        )
+                        if occupant is not None:
+                            self._layout_positions[occupant] = list(self._layout_positions[bid])
+                        self._layout_positions[bid] = [target[0], target[1]]
+                    elif self._layout_drag_kind == 'camera':
+                        sid = self._layout_drag_id
+                        self._layout_camera_positions[sid] = [target[0], target[1]]
+            self._layout_drag_kind = None
+            self._layout_drag_id = None
             return
+
         if self.calibration_mode and self._calib_dragging:
             self._calib_dragging = False
             if self._calib_drag_start and self._calib_drag_end and self._calib_active_source is not None:
@@ -506,8 +694,8 @@ class UIDisplay:
                         "id": next_id,
                         "source_id": self._calib_active_source,
                         "countdown_first": 720,
-                        "countdown_second": 300,
-                        "done_first_timeout": 600,
+                        "countdown_second": 270,
+                        "done_first_timeout": 120,
                         "pot_absent_threshold": 30,
                         "roi": roi
                     })
@@ -523,6 +711,8 @@ class UIDisplay:
         if self._screen is None:
             return
 
+        self._flush_announcements()
+
         # 길게 누르기 버튼 처리
         now = time.monotonic()
         for bid, start_t in list(self._reset_hold.items()):
@@ -533,36 +723,29 @@ class UIDisplay:
         sw, sh = self._screen.get_size()
         self._screen.fill(_C_BG)
 
-        # 패널 폭 결정 — 영상 숨김 시 패널이 전체 폭. 창 크기에 맞춰 클램프.
-        if self._video_hidden:
-            panel_w = sw
+        canvas_y0 = self._draw_toolbar(sw)
+        canvas_h = max(0, sh - canvas_y0)
+
+        # 통합 캔버스 좌표계 (반칸 그리드) 갱신 — 매 프레임 창 크기에 맞춰 재계산
+        self._canvas_origin = (0, canvas_y0)
+        self._half_cell_w = max(1, sw // max(1, self._layout_cols))
+        self._half_cell_h = max(1, int(self._half_cell_w * _HALF_CELL_ASPECT))
+
+        if self.calibration_mode:
+            self._draw_canvas_cameras(frames or {}, processor, sw, canvas_y0, canvas_h, force_all=True)
+            self._draw_calibration_overlay(sw, canvas_h, canvas_y0)
+        elif self.layout_mode:
+            self._draw_layout_editor(frames or {}, processor, sw, canvas_y0, canvas_h)
         else:
-            panel_w = max(300, min(sw, self._right_panel_w))
-            self._right_panel_w = panel_w
-        main_w = sw - panel_w
-
-        # 1. 왼쪽 카메라 그리드 렌더링 (영상 영역이 있을 때만)
-        if main_w > 0:
-            self._draw_camera_grid(frames or {}, processor, main_w, sh)
-            if self.calibration_mode:
-                self._draw_calibration_overlay(main_w, sh)
-
-        # 2. 오른쪽 제어 패널 렌더링
-        right_panel = pygame.Rect(main_w, 0, panel_w, sh)
-        pygame.draw.rect(self._screen, _C_PANEL, right_panel)
-        # 패널 왼쪽 구분선 + 드래그 핸들 (영상 표시 중일 때만)
-        if main_w > 0:
-            pygame.draw.line(self._screen, _C_CARD_BORDER, (main_w, 0), (main_w, sh), 2)
-            self._draw_divider_handle(main_w, sh)
-
-        self._draw_right_panel(main_w, sh, panel_w)
+            self._draw_canvas_cameras(frames or {}, processor, sw, canvas_y0, canvas_h, force_all=False)
+            self._draw_canvas_burners()
 
         # Toast (있으면)
         if self._toast_msg and time.monotonic() < self._toast_until:
             toast = self._fonts["label"].render(self._toast_msg, True, _C_TEXT_DARK)
             pad = 14
             box = pygame.Rect(0, 0, toast.get_width() + pad * 2, toast.get_height() + 12)
-            box.midbottom = (main_w // 2, sh - 24)
+            box.midbottom = (sw // 2, sh - 24)
             pygame.draw.rect(self._screen, _C_BRAND, box, border_radius=6)
             self._screen.blit(toast, toast.get_rect(center=box.center))
 
@@ -570,33 +753,20 @@ class UIDisplay:
         if self._clock:
             self._clock.tick(30) # 30fps UI Redraw
 
-    def _draw_divider_handle(self, x: int, sh: int) -> None:
-        """분할선 중앙에 세로 그립(점 3개) — 끌 수 있다는 발견성 표시."""
-        cy = sh // 2
-        for dy in (-12, 0, 12):
-            pygame.draw.circle(self._screen, _C_BRAND, (x, cy + dy), 2)
+    def _draw_canvas_cameras(
+        self, frames: dict, processor, sw: int, canvas_y0: int, canvas_h: int, *, force_all: bool,
+    ) -> None:
+        """카메라 박스들을 반칸 그리드의 layout_pos/layout_size 위치에 그린다.
 
-    def _grid_dims(self, n: int) -> tuple[int, int]:
-        """카메라 N대 → (cols, rows). 1:풀화면, 2:1×2, 3~4:2×2, 5~6:3×2, 7~9:3×3, …"""
-        if n <= 1: return (1, 1)
-        if n == 2: return (2, 1)
-        if n <= 4: return (2, 2)
-        if n <= 6: return (3, 2)
-        if n <= 9: return (3, 3)
-        if n <= 12: return (4, 3)
-        return (4, 4)
-
-    def _draw_camera_grid(self, frames: dict, processor, box_w: int, box_h: int):
-        """카메라 N대를 균등 그리드로 표시. 각 셀의 _cam_cells 기록.
-
-        풀뷰(_focus_camera_id) 지정 시 해당 카메라만 영상 영역 전체로 크게 표시.
-        오프라인 추적은 풀뷰 여부와 무관하게 전체 카메라 대상으로 수행.
+        force_all=True (캘리브레이션 모드): 풀뷰/영상숨김 무시하고 전체 카메라 표시.
+        풀뷰(_focus_camera_id) 지정 시 해당 카메라만 캔버스 전체로 크게 표시.
+        오프라인 추적은 항상 전체 카메라 대상으로 수행.
         """
         all_sources = self.config_data.get("sources", [])
         if not all_sources:
+            self._cam_cells.clear()
             return
 
-        # 오프라인 상태 지속 시간 체크 및 소리 재생 (전체 카메라 대상)
         now = time.monotonic()
         for sc in all_sources:
             sid = sc["id"]
@@ -608,41 +778,50 @@ class UIDisplay:
                 self._cam_offline_since.pop(sid, None)
                 self._cam_lost_played.pop(sid, None)
 
-        # 렌더 대상 — 풀뷰면 포커스 카메라만 (캘리브 모드에서는 항상 전체)
-        sources_cfg = all_sources
-        if self._focus_camera_id is not None and not self.calibration_mode:
-            focused = [s for s in all_sources if s["id"] == self._focus_camera_id]
-            if focused:
-                sources_cfg = focused
-            else:
-                self._focus_camera_id = None  # 포커스 카메라가 사라졌으면 해제
-
-        n = len(sources_cfg)
-        cols, rows = self._grid_dims(n)
-        cell_w = (box_w - _CELL_GAP * (cols + 1)) // cols
-        cell_h = (box_h - _CELL_GAP * (rows + 1)) // rows
+        if self._video_hidden and not force_all:
+            self._cam_cells.clear()
+            return
 
         self._cam_cells.clear()
+        self._cam_box_rects.clear()
 
-        for i, sc in enumerate(sources_cfg):
+        if not force_all and self._focus_camera_id is not None:
+            focused = [s for s in all_sources if s["id"] == self._focus_camera_id]
+            if not focused:
+                self._focus_camera_id = None
+            else:
+                sc = focused[0]
+                margin = 20
+                ox, oy = margin, canvas_y0 + margin
+                cw, ch = max(1, sw - margin * 2), max(1, canvas_h - margin * 2)
+                cell_bg = pygame.Rect(ox, oy, cw, ch)
+                pygame.draw.rect(self._screen, _C_PANEL, cell_bg, border_radius=4)
+                self._draw_camera_cell(sc, frames.get(sc["id"]), processor, ox, oy, cw, ch)
+                hint = self._fonts["small"].render("더블클릭으로 그리드 복귀", True, _C_BRAND)
+                self._screen.blit(hint, (ox + 8, oy + ch - 22))
+                return
+
+        gx, gy = self._canvas_origin
+        for sc in all_sources:
             src_id = sc["id"]
-            r = i // cols
-            c = i % cols
-            ox = _CELL_GAP + c * (cell_w + _CELL_GAP)
-            oy = _CELL_GAP + r * (cell_h + _CELL_GAP)
+            row, col = self._camera_layout_pos(src_id)
+            rows, cols = self._camera_layout_size(src_id)
+            ox = gx + col * self._half_cell_w
+            oy = gy + row * self._half_cell_h
+            cw = max(1, cols * self._half_cell_w)
+            ch = max(1, rows * self._half_cell_h)
 
-            cell_bg = pygame.Rect(ox, oy, cell_w, cell_h)
+            cell_bg = pygame.Rect(ox, oy, cw, ch)
+            self._cam_box_rects[src_id] = cell_bg
             pygame.draw.rect(self._screen, _C_PANEL, cell_bg, border_radius=4)
 
             frame = frames.get(src_id)
-            self._draw_camera_cell(sc, frame, processor, ox, oy, cell_w, cell_h)
+            self._draw_camera_cell(sc, frame, processor, ox, oy, cw, ch)
 
-            # 카메라 유실 3초 이상이면 빨간색 점멸 테두리
             is_lost = False
             if src_id in self._cam_offline_since:
                 if now - self._cam_offline_since[src_id] >= 3.0:
                     is_lost = True
-                    # 최초 경보음 재생
                     if not self.mute and self._sound_cam_lost:
                         if not self._cam_lost_played.get(src_id, False):
                             self._sound_cam_lost.play()
@@ -651,9 +830,23 @@ class UIDisplay:
             if is_lost:
                 if int(time.time() * 3) % 2 == 0:
                     pygame.draw.rect(self._screen, _C_FAILED, cell_bg, width=4, border_radius=4)
-            # 선택된 카메라면 외곽에 노란 스트로크
             elif self._selected_camera_id == src_id:
                 pygame.draw.rect(self._screen, _C_BRAND, cell_bg, width=4, border_radius=4)
+
+    def _draw_canvas_burners(self) -> None:
+        """화구 카드들을 반칸 그리드의 grid_pos 위치(2×2 반칸 고정 크기)에 그린다."""
+        self._card_rects.clear()
+        self._start_rects.clear()
+        self._reset_rects.clear()
+
+        gx, gy = self._canvas_origin
+        w = 2 * self._half_cell_w
+        h = 2 * self._half_cell_h
+        for bsm in self._registry.all():
+            row, col = self._burner_grid_pos(bsm.burner_id)
+            x = gx + col * self._half_cell_w
+            y = gy + row * self._half_cell_h
+            self._draw_burner_card(bsm, x, y, w, h)
 
     def _draw_camera_cell(self, sc: dict, frame, processor, ox: int, oy: int, cw: int, ch: int):
         """단일 카메라 셀 렌더링. frame이 None이면 '연결 안 됨' 표시."""
@@ -778,7 +971,7 @@ class UIDisplay:
             pause_surf.blit(txt, txt.get_rect(center=(nw//2, nh//2)))
             self._screen.blit(pause_surf, (cx, cy))
 
-    def _draw_calibration_overlay(self, box_w, box_h):
+    def _draw_calibration_overlay(self, box_w, box_h, canvas_y0: int = 0):
         """캘리브레이션 모드 — 확정된 화구를 각 source_id 셀에 매핑해서 표시."""
         # 1. 확정된 화구들 (셀별 좌표 변환)
         for idx, b in enumerate(self._calib_burners):
@@ -816,10 +1009,10 @@ class UIDisplay:
                 sh = int(rh * scale)
                 pygame.draw.rect(self._screen, (255, 100, 100), (sx, sy, sw, sh), 2)
 
-        # 3. 상단 안내 바
+        # 3. 상단 안내 바 (캔버스 영역 상단에 오버레이)
         banner = pygame.Surface((box_w, 60), pygame.SRCALPHA)
         banner.fill((0, 0, 0, 180))
-        self._screen.blit(banner, (0, 0))
+        self._screen.blit(banner, (0, canvas_y0))
         title = self._fonts["title"].render("🛠 화구 설정 (Calibration) 모드", True, _C_BRAND)
         n_per_src: dict[int, int] = {}
         for b in self._calib_burners:
@@ -832,135 +1025,220 @@ class UIDisplay:
             f"드래그=새화구  클릭=선택  DEL=삭제  [ ]=ID앞뒤  Z=이전취소  ENTER=저장  ESC=취소  ({summary}){sel_hint}",
             True, _C_TEXT_LIGHT
         )
-        self._screen.blit(title, (20, 8))
-        self._screen.blit(desc, (20, 36))
+        self._screen.blit(title, (20, canvas_y0 + 8))
+        self._screen.blit(desc, (20, canvas_y0 + 36))
 
-    def _draw_right_panel(self, px: int, ph: int, panel_w: int = _RIGHT_PANEL_W):
-        # 상단 헤더 (로고/타이틀 영역)
-        header_h = 70
-        pygame.draw.rect(self._screen, _C_BRAND, (px, 0, panel_w, header_h))
+    def _draw_toolbar(self, sw: int) -> int:
+        """상단 통합 툴바 (헤더 + 버튼 + 카메라 관리). 반환값 = 캔버스 시작 y."""
+        header_h = 50
+        pygame.draw.rect(self._screen, _C_BRAND, (0, 0, sw, header_h))
         title_surf = self._fonts["title"].render("길가옆에 압력밥솥 타이머", True, _C_TEXT_DARK)
-        self._screen.blit(title_surf, (px + 20, 20))
-        
-        # 모델 부재 경고
-        oy = header_h + 10
+        self._screen.blit(title_surf, (16, 14))
+
+        oy = header_h + 6
         if self._model_missing:
-            wrng = pygame.Rect(px + 10, oy, panel_w - 20, 36)
+            wrng = pygame.Rect(10, oy, sw - 20, 30)
             pygame.draw.rect(self._screen, _C_WARNING_BG, wrng, border_radius=6)
             msg = self._fonts["small"].render("⚠ AI 모델 없음 (수동 구동만 가능)", True, _C_TEXT_LIGHT)
-            self._screen.blit(msg, (px + 20, oy + 10))
-            oy += 46
+            self._screen.blit(msg, (20, oy + 7))
+            oy += 38
 
-        # 상태 및 툴바
-        toolbar_rect = pygame.Rect(px + 10, oy, panel_w - 20, 64)
+        toolbar_h = 40
+        toolbar_rect = pygame.Rect(10, oy, sw - 20, toolbar_h)
         pygame.draw.rect(self._screen, _C_CARD_BG, toolbar_rect, border_radius=6)
-        
-        conf_btn = self._fonts["small"].render("⚙ 설정(F)", True, _C_BRAND if not self.calibration_mode else _C_TEXT_LIGHT)
-        mask_btn = self._fonts["small"].render(f"Mask(M): {'ON' if self.show_mask else 'OFF'}", True, _C_BRAND if self.show_mask else _C_TEXT_LIGHT)
-        cam_btn = self._fonts["small"].render("카메라 전환(C)", True, _C_TEXT_LIGHT)
-        dev_btn = self._fonts["small"].render(f"Dev(D): {'ON' if getattr(self, 'dev_mode', False) else 'OFF'}", True, _C_BRAND if getattr(self, 'dev_mode', False) else _C_TEXT_LIGHT)
-        play_btn = self._fonts["small"].render("일시정지(Space)" if not self.video_paused else "재생(Space)", True, _C_BRAND if self.video_paused else _C_TEXT_LIGHT)
+        by = oy + 12
 
-        self._screen.blit(conf_btn, (px + 20, oy + 12))
-        self._screen.blit(mask_btn, (px + 110, oy + 12))
-        self._screen.blit(cam_btn, (px + 210, oy + 12))
-        
-        self._screen.blit(dev_btn, (px + 20, oy + 36))
-        self._screen.blit(play_btn, (px + 110, oy + 36))
+        conf_btn   = self._fonts["small"].render("⚙ 설정(F)", True, _C_BRAND if not self.calibration_mode else _C_TEXT_LIGHT)
+        layout_btn = self._fonts["small"].render("🪄 배치(L)", True, _C_BRAND if not self.layout_mode else _C_TEXT_LIGHT)
+        mask_btn   = self._fonts["small"].render(f"Mask(M): {'ON' if self.show_mask else 'OFF'}", True, _C_BRAND if self.show_mask else _C_TEXT_LIGHT)
+        cam_btn    = self._fonts["small"].render("카메라 전환(C)", True, _C_TEXT_LIGHT)
+        dev_btn    = self._fonts["small"].render(f"Dev(D): {'ON' if self.dev_mode else 'OFF'}", True, _C_BRAND if self.dev_mode else _C_TEXT_LIGHT)
+        play_btn   = self._fonts["small"].render("일시정지(Space)" if not self.video_paused else "재생(Space)", True, _C_BRAND if self.video_paused else _C_TEXT_LIGHT)
+        hide_btn   = self._fonts["small"].render(f"영상(V): {'숨김' if self._video_hidden else '표시'}", True, _C_BRAND if self._video_hidden else _C_TEXT_LIGHT)
+        sound_btn  = self._fonts["small"].render(f"소리(N): {'OFF' if self.mute else 'ON'}", True, _C_BRAND if not self.mute else _C_FAILED)
 
-        # 소리 ON/OFF 버튼 렌더링 및 클릭 영역 지정
-        sound_btn = self._fonts["small"].render(f"소리(N): {'OFF' if self.mute else 'ON'}", True, _C_BRAND if not self.mute else _C_FAILED)
-        self._screen.blit(sound_btn, (px + 210, oy + 36))
-        self._sound_rect = pygame.Rect(px + 210, oy + 32, 100, 24)
+        xs = [20, 110, 200, 300, 420, 500, 620, 710]
+        items = [conf_btn, layout_btn, mask_btn, cam_btn, dev_btn, play_btn, hide_btn, sound_btn]
+        for surf, x in zip(items, xs):
+            self._screen.blit(surf, (x, by))
 
-        oy += 74
+        self._layout_btn_rect = pygame.Rect(xs[1], oy + 6, 80, 28)
+        self._sound_rect      = pygame.Rect(xs[7], oy + 6, 90, 28)
 
-        # 카메라 관리 — 현재 대수 + +/- 버튼
+        # 카메라 대수 + +/- 버튼 (우측 정렬)
         n_cams = len(self.config_data.get("sources", []))
-        cam_bar = pygame.Rect(px + 10, oy, panel_w - 20, 44)
-        pygame.draw.rect(self._screen, _C_CARD_BG, cam_bar, border_radius=6)
-
-        sel_hint = f"  (선택: Cam-{self._selected_camera_id})" if self._selected_camera_id is not None else ""
+        sel_hint = f" (선택:Cam-{self._selected_camera_id})" if self._selected_camera_id is not None else ""
         cam_label = self._fonts["small"].render(f"카메라 {n_cams}대{sel_hint}", True, _C_TEXT_LIGHT)
-        self._screen.blit(cam_label, (px + 20, oy + 14))
 
-        btn_w, btn_h = 70, 28
-        add_x = px + panel_w - 20 - btn_w
+        btn_w, btn_h = 64, 26
+        add_x = sw - 16 - btn_w
         rem_x = add_x - btn_w - 6
-        self._cam_remove_rect = pygame.Rect(rem_x, oy + 8, btn_w, btn_h)
-        self._cam_add_rect = pygame.Rect(add_x, oy + 8, btn_w, btn_h)
+        label_x = rem_x - cam_label.get_width() - 16
+        self._screen.blit(cam_label, (label_x, by))
 
-        # 제거 버튼: 카메라 선택 시 강조, 미선택 시 회색
+        self._cam_remove_rect = pygame.Rect(rem_x, oy + 7, btn_w, btn_h)
+        self._cam_add_rect    = pygame.Rect(add_x, oy + 7, btn_w, btn_h)
         rem_active = self._selected_camera_id is not None
         rem_color = (180, 60, 60) if rem_active else (60, 60, 70)
-        rem_text = f"− Cam-{self._selected_camera_id}" if rem_active else "− 제거"
+        rem_text = f"−Cam{self._selected_camera_id}" if rem_active else "− 제거"
         pygame.draw.rect(self._screen, rem_color, self._cam_remove_rect, border_radius=4)
         pygame.draw.rect(self._screen, _C_SUCCESS, self._cam_add_rect, border_radius=4)
         rem_surf = self._fonts["btn"].render(rem_text, True, _C_TEXT_LIGHT)
-        add_surf = self._fonts["btn"].render("+ 추가", True, _C_TEXT_LIGHT)
+        add_surf = self._fonts["btn"].render("+추가", True, _C_TEXT_LIGHT)
         self._screen.blit(rem_surf, rem_surf.get_rect(center=self._cam_remove_rect.center))
         self._screen.blit(add_surf, add_surf.get_rect(center=self._cam_add_rect.center))
 
-        oy += 54
+        oy += toolbar_h + 8
+        return oy
 
-        if self.calibration_mode:
-            # 설정 모드일 때는 카드 리스트 대신 설정 가이드 노출
-            guide_y = oy + 40
-            c_surf = self._fonts["label"].render("영상 영역에 마우스를 드래그하여", True, _C_TEXT_LIGHT)
-            self._screen.blit(c_surf, (px + 40, guide_y))
-            c_surf2 = self._fonts["label"].render("불이 나오는 화구 위치를 잡아주세요.", True, _C_TEXT_LIGHT)
-            self._screen.blit(c_surf2, (px + 40, guide_y + 30))
-            
-            c_help = self._fonts["small"].render("단축키안내", True, _C_BRAND)
-            self._screen.blit(c_help, (px + 40, guide_y + 100))
-            self._screen.blit(self._fonts["small"].render("✔ ENTER : 저장 후 적용", True, _C_TEXT_LIGHT), (px + 40, guide_y + 130))
-            self._screen.blit(self._fonts["small"].render("✔ ESC : 저장하지 않고 나가기", True, _C_TEXT_LIGHT), (px + 40, guide_y + 155))
-            self._screen.blit(self._fonts["small"].render("✔ Z : 마지막 그린 화구 취소", True, _C_TEXT_LIGHT), (px + 40, guide_y + 180))
-            return
+    def _draw_layout_editor(
+        self, frames: dict, processor, sw: int, canvas_y0: int, canvas_h: int,
+    ) -> None:
+        """배치 모드 — 카메라 박스 + 화구 카드를 반칸 그리드 위에서 드래그로 재배치."""
+        gx, gy = self._canvas_origin
+        cols = max(1, self._layout_cols)
+        rows = max(1, canvas_h // self._half_cell_h) if self._half_cell_h else 1
 
-        # 스크롤 가능한/리스트 카드 영역 (4열 그리드)
-        # 마우스 Hover 판정을 통한 정렬 Freeze 잠금 장치
-        mx, my = pygame.mouse.get_pos()
-        panel_rect = pygame.Rect(px + 5, oy, panel_w - 10, ph - oy)
-        is_hovering = panel_rect.collidepoint((mx, my))
+        # 그리드 라인
+        for c in range(cols + 1):
+            x = gx + c * self._half_cell_w
+            pygame.draw.line(self._screen, (60, 60, 70), (x, gy), (x, gy + rows * self._half_cell_h), 1)
+        for r in range(rows + 1):
+            y = gy + r * self._half_cell_h
+            pygame.draw.line(self._screen, (60, 60, 70), (gx, y), (gx + cols * self._half_cell_w, y), 1)
 
-        # 캐시가 없거나 호버 중이 아닐 때만 정렬 순서 업데이트
-        if not getattr(self, "_sorted_burners_cache", None) or not is_hovering:
-            HOLD_S = 8.0
-            def sort_key(b):
-                if b.is_counting:
-                    return (0, b.remaining_seconds, b.burner_id)
-                sd = b.seconds_since_done
-                if 0 <= sd <= HOLD_S:
-                    return (1, sd, b.burner_id)
-                return (2, b.burner_id, 0)
-            self._sorted_burners_cache = sorted(self._registry.all(), key=sort_key)
+        # 카메라 박스 (드래그/리사이즈 가능) — 항상 좌측상단 기준으로 스냅된 실제 위치/크기를 그린다
+        self._cam_cells.clear()
+        self._cam_box_rects.clear()
+        self._cam_resize_handles.clear()
+        for sc in self.config_data.get("sources", []):
+            src_id = sc["id"]
+            row, col = self._layout_camera_positions.get(src_id, self._camera_layout_pos(src_id))
+            rsize, csize = self._layout_camera_sizes.get(src_id, self._camera_layout_size(src_id))
+            ox = gx + col * self._half_cell_w
+            oy_box = gy + row * self._half_cell_h
+            cw = max(1, csize * self._half_cell_w)
+            ch = max(1, rsize * self._half_cell_h)
 
-        burners = self._sorted_burners_cache
-        if not burners:
-            return
+            is_active = self._layout_drag_id == src_id
+            if is_active and self._layout_drag_kind == 'camera':
+                anchor = self._layout_drag_anchor()
+                target = self._layout_cell_at(anchor)
+                if target is not None:
+                    ox = gx + target[1] * self._half_cell_w
+                    oy_box = gy + target[0] * self._half_cell_h
+            elif is_active and self._layout_drag_kind == 'resize':
+                live_rows, live_cols = self._layout_resize_dims(src_id, self._layout_drag_pos)
+                cw = max(1, live_cols * self._half_cell_w)
+                ch = max(1, live_rows * self._half_cell_h)
 
-        cols = 4
-        gap  = 6
-        card_w = (panel_w - 10 - (cols - 1) * gap) // cols
-        card_h = 102
+            cell_bg = pygame.Rect(ox, oy_box, cw, ch)
+            self._cam_box_rects[src_id] = cell_bg
+            pygame.draw.rect(self._screen, _C_PANEL, cell_bg, border_radius=4)
+            frame = (frames or {}).get(src_id)
+            self._draw_camera_cell(sc, frame, processor, ox, oy_box, cw, ch)
+            # 오프라인이라 _cam_cells에 못 등록됐을 경우를 위한 드래그용 폴백 rect
+            self._cam_cells.setdefault(src_id, {"rect": cell_bg, "scale": 1.0, "frame_size": (cw, ch)})
+            border_color = _C_BRAND if is_active and self._layout_drag_kind in ('camera', 'resize') else (120, 200, 255)
+            border_w = 3 if is_active else 2
+            pygame.draw.rect(self._screen, border_color, cell_bg, width=border_w, border_radius=4)
 
+            # 리사이즈 핸들 (우하단 모서리, ↘ 모양)
+            hs = 14
+            handle_rect = pygame.Rect(cell_bg.right - hs, cell_bg.bottom - hs, hs, hs)
+            self._cam_resize_handles[src_id] = handle_rect
+            pygame.draw.rect(self._screen, _C_BRAND, handle_rect, border_radius=3)
+            pygame.draw.line(
+                self._screen, _C_TEXT_DARK,
+                (handle_rect.x + 3, handle_rect.bottom - 3), (handle_rect.right - 3, handle_rect.y + 3), 2,
+            )
+
+        # 화구 카드 (드래그 가능) — 좌측상단 기준으로 스냅된 실제 위치를 그린다
         self._card_rects.clear()
         self._start_rects.clear()
         self._reset_rects.clear()
+        w = 2 * self._half_cell_w
+        h = 2 * self._half_cell_h
+        for bsm in self._registry.all():
+            bid = bsm.burner_id
+            row, col = self._layout_positions.get(bid, [0, 0])
+            x = gx + col * self._half_cell_w
+            y = gy + row * self._half_cell_h
+            is_dragging = self._layout_drag_kind == 'burner' and self._layout_drag_id == bid
+            if is_dragging:
+                anchor = self._layout_drag_anchor()
+                target = self._layout_cell_at(anchor)
+                if target is not None:
+                    x = gx + target[1] * self._half_cell_w
+                    y = gy + target[0] * self._half_cell_h
+            self._draw_burner_card(bsm, x, y, w, h)
+            if is_dragging:
+                pygame.draw.rect(self._screen, _C_BRAND, (x, y, w, h), width=3, border_radius=8)
 
-        for i, bsm in enumerate(burners):
-            r = i // cols
-            c = i % cols
-            cx = px + 5 + c * (card_w + gap)
-            cy = oy + r * (card_h + gap)
-            self._draw_burner_card(bsm, cx, cy, card_w, card_h)
+        # 안내 배너
+        banner = pygame.Surface((sw, 36), pygame.SRCALPHA)
+        banner.fill((0, 0, 0, 180))
+        self._screen.blit(banner, (0, canvas_y0))
+        title = self._fonts["small"].render(
+            "🪄 배치 모드 — 드래그=이동, 카메라 모서리 핸들=크기조절   ENTER=저장  ESC=취소",
+            True, _C_BRAND,
+        )
+        self._screen.blit(title, (10, canvas_y0 + 9))
 
     @staticmethod
     def _card_text_color(bg_color: tuple) -> tuple:
         r, g, b = bg_color
         lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
         return _C_TEXT_DARK if lum > 0.4 else _C_TEXT_LIGHT
+
+    def _dynamic_font(self, size: int) -> pygame.font.Font:
+        """카드 크기에 비례하는 화구 번호 폰트 — 크기별 캐시."""
+        size = max(8, int(size))
+        f = self._font_cache.get(size)
+        if f is None:
+            f = pygame.font.Font(self._font_path, size) if self._font_path else pygame.font.Font(None, size + 4)
+            f.set_bold(True)
+            self._font_cache[size] = f
+        return f
+
+    def _queue_announcement(self, status: str, bid: int) -> None:
+        """화구 안내 이벤트를 지연 없이 즉시 재생열에 적재.
+
+        진행 중인 배치(아직 상태어를 안 붙인 번호들)가 같은 상태(warn30/done)면
+        번호만 이어붙인다 — "1번 2번 3번 30초전"처럼 합쳐짐.
+        다른 상태가 끼어들면 진행 중인 배치를 즉시 상태어로 마무리하고 새 배치를 연다.
+        """
+        if self._open_status is not None and self._open_status != status:
+            self._seal_open_batch()
+        self._open_status = status
+        snd = self._sound_numbers.get(bid)
+        if snd:
+            self._announce_queue.append(snd)
+
+    def _seal_open_batch(self) -> None:
+        """열려 있는 배치에 상태어를 붙여 마무리."""
+        status = self._open_status
+        self._open_status = None
+        if status is None:
+            return
+        status_snd = self._sound_warn_30s if status == "warn30" else self._sound_complete
+        if status_snd:
+            self._announce_queue.append(status_snd)
+
+    def _flush_announcements(self) -> None:
+        """예약 채널이 비면 다음 항목 재생. 더 재생할 게 없는데 배치가 열려 있으면
+        (재생 시간 동안 같은 상태의 다른 화구가 끼어들지 않았다는 뜻) 그 자리에서 마무리."""
+        if self.mute:
+            self._announce_queue.clear()
+            self._open_status = None
+            return
+        if self._announce_channel is None:
+            return
+        if not self._announce_channel.get_busy():
+            if not self._announce_queue and self._open_status is not None:
+                self._seal_open_batch()
+            if self._announce_queue:
+                self._announce_channel.play(self._announce_queue.pop(0))
 
     def _draw_burner_card(self, bsm, x, y, w, h):
         bid = bsm.burner_id
@@ -973,14 +1251,12 @@ class UIDisplay:
         # 1) 완료 30초 전 예고 (남은 시간이 30초 선을 막 통과했을 때)
         from core.state_machine import BurnerState as BS
         if bsm.is_counting and prev_rem > 30 >= cur_rem > 0:
-            if not self.mute and self._sound_warn_30s:
-                self._sound_warn_30s.play()
+            self._queue_announcement("warn30", bid)
 
         # 2) 완료 순간 전이 (STEAMING -> DONE_FIRST 또는 DONE_SECOND)
         prev_st = self._prev_states.get(bid, bsm.state)
         if prev_st in (BS.POT_STEAMING_FIRST, BS.POT_STEAMING_SECOND) and bsm.state in (BS.DONE_FIRST, BS.DONE_SECOND):
-            if not self.mute and self._sound_complete:
-                self._sound_complete.play()
+            self._queue_announcement("done", bid)
 
         self._prev_remaining[bid] = cur_rem
         self._prev_states[bid] = bsm.state
@@ -1017,20 +1293,6 @@ class UIDisplay:
 
         tc = self._card_text_color(bg_color)
 
-        # --- 1. 화구 번호 (일반 모드: 좌상단에 크고 굵은 숫자 / dev_mode: 상단 콤팩트 축소) ---
-        if self.dev_mode:
-            # 개발 모드: 콤팩트한 번호 배지
-            rad = 8
-            cx, cy = x + 10, y + 11
-            pygame.draw.circle(self._screen, _C_BRAND, (cx, cy), rad)
-            id_surf = self._fonts["small"].render(str(bid), True, _C_TEXT_DARK)
-            self._screen.blit(id_surf, id_surf.get_rect(center=(cx, cy)))
-        else:
-            # 일반 모드: 크고 수려한 화구 번호 텍스트
-            num_str = f"{bid:02d}" if bid >= 10 else str(bid)
-            id_surf = self._fonts["card_num"].render(num_str, True, tc)
-            self._screen.blit(id_surf, (x + 8, y + 4))
-
         # --- 2. [Cam-N] 뱃지 (우상단 정렬) ---
         cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
         src_id = cfg.get("source_id", 0) if cfg else 0
@@ -1043,9 +1305,30 @@ class UIDisplay:
         pygame.draw.rect(self._screen, (100, 100, 110, 100), badge_rect, 1, border_radius=3)
         self._screen.blit(cam_surf, (badge_rect.x + bp, badge_rect.y + 1))
 
-        # --- 3. 상태 메시지 및 타이머 (3단 텍스트 중복/침범 소거 완료) ---
-        # EMPTY / POT_IDLE / WAIT_SECOND / DONE_SECOND -> 단 1개의 큼직한 한글 텍스트만 노출
-        # STEAMING / DONE_FIRST -> 단계 뱃지 + 중앙 큼직한 타이머 노출
+        # --- 1. 화구 번호 — 카드에서 가장 크고 눈에 잘 보이는 핵심 요소.
+        # 상태/타이머/게이지/버튼이 들어갈 하단 footer를 제외한 나머지 영역을
+        # 전부 채우는 크기로 렌더링하고, 가로 중앙에 배치한다.
+        footer_h = 54  # 상태줄 + 게이지 + 버튼 영역에 필요한 고정 높이
+        if self.dev_mode:
+            # 개발 모드: 정보가 많아 번호는 콤팩트한 배지로 축소
+            rad = 8
+            cx, cy = x + 10, y + 11
+            pygame.draw.circle(self._screen, _C_BRAND, (cx, cy), rad)
+            id_surf = self._fonts["small"].render(str(bid), True, _C_TEXT_DARK)
+            self._screen.blit(id_surf, id_surf.get_rect(center=(cx, cy)))
+            num_zone_h = 20
+        else:
+            num_str = f"{bid:02d}" if bid >= 10 else str(bid)
+            num_zone_h = max(20, h - footer_h)
+            num_size = max(22, int(num_zone_h * 0.85))
+            num_font = self._dynamic_font(num_size)
+            id_surf = num_font.render(num_str, True, tc)
+            id_x = x + (w - id_surf.get_width()) // 2
+            id_y = y + 2 + max(0, (num_zone_h - id_surf.get_height()) // 2)
+            self._screen.blit(id_surf, (id_x, id_y))
+        body_y = y + num_zone_h + 2
+
+        # --- 3. 상태 메시지 및 타이머 — 번호 아래 보조 정보 한 줄 ---
         if bsm.state in (BS.EMPTY, BS.POT_IDLE, BS.WAIT_SECOND, BS.DONE_SECOND):
             status_text = {
                 BS.EMPTY: "대기",
@@ -1053,41 +1336,26 @@ class UIDisplay:
                 BS.WAIT_SECOND: "재벌대기",
                 BS.DONE_SECOND: "완료!",
             }.get(bsm.state, "대기")
-            
-            # 중앙에 정갈하게 배치
             st_surf = self._fonts["card_status"].render(status_text, True, tc)
-            self._screen.blit(st_surf, (x + 8, y + 34))
+            self._screen.blit(st_surf, (x + 8, body_y))
         else:
-            # 타이머 작동 중인 상태 (STEAMING_FIRST, STEAMING_SECOND, DONE_FIRST)
-            # 단계 뱃지 렌더링
-            ph_label = bsm.phase_label
-            if bsm.state == BS.DONE_FIRST:
-                ph_label = "냉각 중"
-            
-            ph_surf = self._fonts["small"].render(ph_label, True, tc)
-            # 단계 뱃지 위치 (화구 번호 우측 공간)
-            offset_x = x + 34 if not self.dev_mode else x + 24
-            self._screen.blit(ph_surf, (offset_x, y + 8))
-
-            # 중앙 타이머 표시 (가장 큼직하고 뚜렷하게)
-            t_color = tc
-            if bsm.state == BS.DONE_FIRST:
-                t_color = _C_BRAND
-            
-            # 개발 모드일 때는 겹치지 않게 타이머 크기 조절
-            f_timer = self._fonts["label"] if self.dev_mode else self._fonts["card_timer"]
-            time_surf = f_timer.render(bsm.status_label, True, t_color)
-            self._screen.blit(time_surf, (x + 8, y + 32))
+            # 타이머 작동 중인 상태 (STEAMING_FIRST, STEAMING_SECOND, DONE_FIRST) — 단계+시간 한 줄로 결합
+            ph_label = "냉각중" if bsm.state == BS.DONE_FIRST else bsm.phase_label
+            t_color = _C_BRAND if bsm.state == BS.DONE_FIRST else tc
+            combined = f"{ph_label} {bsm.status_label}"
+            f_timer = self._fonts["label"] if self.dev_mode else self._fonts["card_status"]
+            time_surf = f_timer.render(combined, True, t_color)
+            self._screen.blit(time_surf, (x + 8, body_y))
 
         # --- 4. 개발자 모드 전용 RMS 수치 오버레이 (일반 모드는 완전 격리) ---
         if self.dev_mode:
             rms_val = bsm.current_angle
             rms_text = f"RMS: {rms_val:.3f}" if rms_val is not None else "RMS: -"
             rms_surf = self._fonts["small"].render(rms_text, True, tc)
-            self._screen.blit(rms_surf, (x + 8, y + 49))
+            self._screen.blit(rms_surf, (x + 8, body_y + 16))
 
         # --- 5. 진동 게이지 (슬림하고 예쁜 라운드 게이지바) ---
-        gauge_x, gauge_y = x + 8, y + 68
+        gauge_x, gauge_y = x + 8, y + h - 34
         gauge_w, gauge_h = w - 18, 4
         pygame.draw.rect(self._screen, (30, 30, 35), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=2)
         score = max(0.0, min(1.0, bsm.vibration_score))
@@ -1133,13 +1401,16 @@ class UIDisplay:
         surf = self._fonts["btn"].render(text, True, _C_TEXT_LIGHT)
         self._screen.blit(surf, surf.get_rect(center=rect.center))
 
-def _load_fonts() -> dict:
-    import sys
+def _resolve_font_path() -> str | None:
     candidates = [
         r"C:\Windows\Fonts\malgun.ttf", r"C:\Windows\Fonts\malgunbd.ttf",
         "/System/Library/Fonts/AppleSDGothicNeo.ttc", "/Library/Fonts/NanumGothic.ttf"
     ]
-    font_path = next((p for p in candidates if os.path.exists(p)), None)
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+def _load_fonts() -> dict:
+    font_path = _resolve_font_path()
     def mk(size, bold=False):
         f = pygame.font.Font(font_path, size) if font_path else pygame.font.Font(None, size + 4)
         if bold:

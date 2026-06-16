@@ -106,6 +106,7 @@ def main():
     RMS_THR      = config["optical_flow"]["rms_threshold"]
     NORMALIZE    = config["optical_flow"].get("normalize_rms", False)
     REF_DIAG     = float(config["optical_flow"].get("normalize_ref_diag", 40.0))
+    NORM_GAMMA   = float(config["optical_flow"].get("normalize_gamma", 1.0))
 
     # 화구별 상태
     prev_grays:     dict[int, np.ndarray | None]           = {bid: None for bid in burner_ids}
@@ -117,7 +118,7 @@ def main():
         ret, frame = src.read()
         if not ret: break
 
-    norm_label = f"norm(÷diag×{REF_DIAG:.0f})" if NORMALIZE else "normalize=OFF"
+    norm_label = f"norm(÷diag×{REF_DIAG:.0f}, gamma={NORM_GAMMA})" if NORMALIZE else "normalize=OFF"
     print(f"\n[임계값 rms_threshold={RMS_THR}  {norm_label}]  skip={args.skip}프레임\n")
     header = f"{'프레임':>5}  {'화구':>4}  {'bbox_d':>6}  {'raw_rms':>8}  {'deform_rms':>10}  {'norm_rms':>9}  {'mask_px':>7}  {'판정':>8}"
     print(header)
@@ -245,7 +246,10 @@ def main():
                     rx = fx - np.mean(fx);     ry = fy - np.mean(fy)
                     deform_rms_val = float(np.sqrt(np.mean(rx ** 2 + ry ** 2)))
                 if NORMALIZE and bbox_d_val > 0:
-                    norm_rms_val = deform_rms_val * REF_DIAG / bbox_d_val
+                    ratio = REF_DIAG / bbox_d_val
+                    if NORM_GAMMA != 1.0:
+                        ratio = ratio ** NORM_GAMMA
+                    norm_rms_val = deform_rms_val * ratio
                 else:
                     norm_rms_val = deform_rms_val
                 cmp_val = norm_rms_val if NORMALIZE else deform_rms_val

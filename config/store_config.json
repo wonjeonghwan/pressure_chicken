@@ -6,17 +6,34 @@
       "id": 5,
       "type": "camera",
       "index": 0,
-      "label": "Cam-5"
+      "label": "Cam-5",
+      "layout_pos": [
+        4,
+        0
+      ],
+      "layout_size": [
+        4,
+        4
+      ]
     },
     {
       "id": 6,
       "type": "camera",
-      "index": 1,
-      "label": "Cam-6"
+      "index": 0,
+      "label": "Cam-6",
+      "layout_pos": [
+        4,
+        4
+      ],
+      "layout_size": [
+        4,
+        4
+      ]
     }
   ],
   "ui": {
     "grid_cols": 6,
+    "layout_cols": 16,
     "window_size": [
       1280,
       720
@@ -49,7 +66,8 @@
     "trigger_frames": 8,
     "reset_on_missing_box": false,
     "normalize_rms": true,
-    "normalize_ref_diag": 40.0
+    "normalize_ref_diag": 40.0,
+    "normalize_gamma": 0.6
   },
   "frequency": {
     "enabled": false,
@@ -69,9 +87,13 @@
       "id": 1,
       "source_id": 5,
       "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "grid_pos": [
+        0,
+        0
+      ],
       "roi": [
         43,
         64,
@@ -83,9 +105,13 @@
       "id": 2,
       "source_id": 5,
       "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "grid_pos": [
+        2,
+        1
+      ],
       "roi": [
         254,
         130,
@@ -97,9 +123,13 @@
       "id": 3,
       "source_id": 5,
       "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "grid_pos": [
+        0,
+        2
+      ],
       "roi": [
         112,
         228,
@@ -111,14 +141,216 @@
       "id": 4,
       "source_id": 5,
       "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "grid_pos": [
+        2,
+        3
+      ],
       "roi": [
         231,
         371,
         97,
         69
+      ]
+    },
+    {
+      "id": 5,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        486,
+        240,
+        108,
+        102
+      ],
+      "grid_pos": [
+        0,
+        4
+      ]
+    },
+    {
+      "id": 6,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        438,
+        576,
+        36,
+        42
+      ],
+      "grid_pos": [
+        2,
+        5
+      ]
+    },
+    {
+      "id": 7,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        648,
+        756,
+        192,
+        138
+      ],
+      "grid_pos": [
+        0,
+        6
+      ]
+    },
+    {
+      "id": 8,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        912,
+        252,
+        354,
+        354
+      ],
+      "grid_pos": [
+        2,
+        7
+      ]
+    },
+    {
+      "id": 9,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1380,
+        300,
+        240,
+        282
+      ],
+      "grid_pos": [
+        0,
+        8
+      ]
+    },
+    {
+      "id": 10,
+      "source_id": 5,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1278,
+        738,
+        162,
+        132
+      ],
+      "grid_pos": [
+        2,
+        9
+      ]
+    },
+    {
+      "id": 11,
+      "source_id": 6,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        252,
+        186,
+        234,
+        198
+      ],
+      "grid_pos": [
+        0,
+        12
+      ]
+    },
+    {
+      "id": 12,
+      "source_id": 6,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        582,
+        588,
+        162,
+        126
+      ],
+      "grid_pos": [
+        1,
+        14
+      ]
+    },
+    {
+      "id": 13,
+      "source_id": 6,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1104,
+        294,
+        168,
+        126
+      ],
+      "grid_pos": [
+        2,
+        12
+      ]
+    },
+    {
+      "id": 14,
+      "source_id": 6,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1596,
+        84,
+        78,
+        162
+      ],
+      "grid_pos": [
+        3,
+        14
+      ]
+    },
+    {
+      "id": 15,
+      "source_id": 6,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1374,
+        588,
+        90,
+        60
+      ],
+      "grid_pos": [
+        4,
+        12
       ]
     }
   ],

@@ -33,6 +33,7 @@ class OpticalFlowDetector:
         self._pos_alpha        = float(flow_cfg.get("pos_ema_alpha", 0.3))  # centroid EMA 계수
         self._normalize_rms      = bool(flow_cfg.get("normalize_rms", False))
         self._normalize_ref_diag = float(flow_cfg.get("normalize_ref_diag", 40.0))
+        self._normalize_gamma    = float(flow_cfg.get("normalize_gamma", 1.0))
         self._window           = flow_cfg.get("window_frames", 25)
         self._trigger          = flow_cfg.get("trigger_frames", 12)
         self._max_box_jump_ratio = float(flow_cfg.get("max_box_jump_ratio", 0.5))
@@ -165,12 +166,16 @@ class OpticalFlowDetector:
         self.last_rms = rms
 
         # ── 5. 크기 정규화 + RMS EMA 스무딩 ─────────────────────────────
-        # normalize_rms=True: norm = rms × ref_diag / bbox_diag
+        # normalize_rms=True: norm = rms × (ref_diag / bbox_diag) ^ gamma
         #   - bbox가 클수록(해상도↑, 카메라 가까움) 나눠서 줄이고 ref_diag로 다시 곱해
-        #     스케일을 유지하므로 threshold 값을 그대로 사용 가능 (상쇄 없음)
-        #   - 서로 다른 해상도·줌 환경에서도 threshold 불변
+        #     스케일을 유지하므로 threshold 값을 그대로 사용 가능
+        #   - gamma=1.0: 완전 보정 (구 방식). gamma<1.0: 보정 강도를 줄여
+        #     카메라 거리에 따른 과보정(가까우면 둔감)/저보정(멀면 예민)을 완화
         if self._normalize_rms and bbox_diag > 0:
-            norm_rms = rms * self._normalize_ref_diag / bbox_diag
+            ratio = self._normalize_ref_diag / bbox_diag
+            if self._normalize_gamma != 1.0:
+                ratio = ratio ** self._normalize_gamma
+            norm_rms = rms * ratio
         else:
             norm_rms = rms
         self.last_normalized_rms = norm_rms

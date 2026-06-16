@@ -1,6 +1,65 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-06-15 (바로재벌·알림음·백엔드 검증 완료) | 현재 단계: UI 작업(0612UI작업.md) 위임 → 매장 1차 테스트
+> 최종 업데이트: 2026-06-16 (UI 통합 캔버스 재설계 + 타이머값 통일 + 정규화 정리) | 현재 단계: 매장 1차 테스트
+
+---
+
+## 2026-06-16 작업 — UI 통합 캔버스 재설계 + 타이머값 통일 + gamma 정리
+
+### A. 화구 상태머신 6→7상태 (WAIT_SECOND 분리)
+- **문제**: 기존 `DONE_FIRST`가 "초벌 완료 냉각"과 "재벌 대기(진동 재활성)"를 `_seen_rest_after_first`
+  플래그로 한 상태 안에서 같이 처리 → 딸랑이가 잠깐만 멈춰도 곧바로 재벌로 오인 전환될 위험.
+- **변경**: `DONE_FIRST`(냉각, 진동 완전 무시, `done_first_timeout` 후 자동 전환)와
+  `WAIT_SECOND`(재벌 대기, 진동 재활성)를 별도 상태로 분리. `done_first_timeout` 기본 600초→
+  이후 사용자 협의로 **120초(2분)** 로 조정.
+- **부가**: `DONE_FIRST`/`WAIT_SECOND`/`DONE_SECOND`에서 pot 미감지 시 즉시 EMPTY로 가지 않고
+  `pot_absent_threshold`(반칸 debounce, 기본 30프레임≈1초 + `_body_ttl` 15프레임 별도 더해
+  총 약 5초 여유) 만큼 연속 미감지일 때만 EMPTY 확정 — 손/김에 잠깐 가려도 타이머 안 날아감.
+- **변경 파일**: `core/state_machine.py`(상태 enum·전환로직·`_pot_absent_count`),
+  `core/frame_processor.py`(WAIT_SECOND 진입 시 oflow 리셋), `main.py`, `ui/ui_display.py`,
+  `config/store_config.json`.
+
+### B. UI 전면 재설계 — 좌/우 분리 패널 폐지 → 통합 캔버스
+- **배경**: 매장 실제 배치(ㄱ자, 화구 두 블록 분리 등)를 화면에 그대로 재현하고 싶다는 요구.
+  기존 구조(좌측 카메라 그리드 / 우측 화구 카드 패널, 카드는 "남은 시간 적은 화구가 위로
+  뜨는" 자동 정렬 고정 4열)로는 표현 불가능.
+- **변경**: 카메라 박스와 화구 카드를 **하나의 캔버스에 반칸(half-cell) 단위 그리드로 함께
+  자유 배치**하는 구조로 전면 교체.
+  - `layout_cols`(반칸 열 수, 기본 16) 기준으로 `_half_cell_w/h` 매 프레임 계산
+  - 화구 카드 = 2×2 반칸 고정, 카메라 박스 = `layout_size`로 칸 수 자유 지정
+  - **배치 모드(`L`키)**: 카드/카메라 드래그 이동(좌측상단 그랩 오프셋 보존, 드래그 중
+    미리보기가 항상 스냅된 실제 위치에 그려짐 — "보이는 대로 놓인다"), 카메라 우하단
+    ↘ 핸들로 반칸 단위 리사이즈. `ENTER` 저장(`grid_pos`/`layout_pos`/`layout_size`) / `ESC` 취소
+  - 카드 자동 정렬(urgency sort) 완전 폐지 → 저장된 위치 고정 표시
+  - 캘리브레이션(F)·카메라 풀뷰(더블클릭)·카메라 추가/제거 등 기존 기능은 새 캔버스 좌표계에
+    맞춰 재구현 (동작 자체는 동일)
+- **화구 카드 재설계**: 화구 번호를 카드 내 **가장 크고 눈에 잘 보이는 요소**로 변경
+  (카드 높이에 비례하는 동적 폰트 크기, 상단 대부분 차지, 가로 중앙 정렬). 상태/타이머는
+  번호 아래 보조 정보 한 줄로 통합. 폰트는 크기별 캐싱(`_dynamic_font`)으로 성능 영향 없음.
+- **변경 파일**: `ui/ui_display.py`(대규모 재작성), `config/store_config.json`
+  (`layout_cols`, 화구 `grid_pos` half-cell 단위로 재산정, 소스 `layout_pos`/`layout_size` 추가).
+- **검증**: 헤드리스(`SDL_VIDEODRIVER=dummy`) 환경에서 일반/배치/캘리브레이션/풀뷰 렌더링,
+  카드·카메라 드래그, 카메라 리사이즈, 저장까지 단위 테스트로 확인. 실제 드래그 체감은
+  디스플레이 있는 환경에서 추가 확인 필요.
+
+### C. optical_flow `normalize_gamma` 실험 도입 → 데이터 부재로 1.0 환원
+- 거리별(딸랑이 bbox 크기별) 보정 강도를 조절하는 `normalize_gamma` 파라미터가 코드에
+  추가되어 있었음(0.6) — 단, 화구별 실제 bbox_diag 분포를 측정한 근거 없이 정해진 값.
+- gamma<1.0은 카메라가 가까운 화구(bbox 큼)는 더 민감하게, 먼 화구(bbox 작음)는 더
+  둔감하게 만드는 식으로 화구별로 다르게 작용 → 근거 없이 두면 화구마다 감도가
+  들쭉날쭉해질 위험.
+- **결정**: 데이터로 확인하기 전까지 `normalize_gamma: 1.0`(완전 보정, 기존 검증된 방식)으로
+  환원. `gamma` 적용 코드 자체는 유지 — 향후 `diag_rms.py --frames 300`으로 화구별 `bbox_d`
+  분포를 실측해 ref_diag(40px)와 크게 벗어나면 데이터 기반으로 재조정.
+- **변경 파일**: `config/store_config.json` (`normalize_gamma` 0.6→1.0).
+
+### D. 타이머 값 전체 화구 통일
+- 인앱 캘리브레이션(F키 드래그)으로 신규 추가된 화구(5~15번)가 코드에 박힌 구버전 기본값
+  (`countdown_second=300`, `done_first_timeout=600`)을 그대로 가져가 1~4번(270/120)과 값이
+  갈라져 있었음.
+- **조치**: 전체 화구를 `countdown_second=270`(4분30초), `done_first_timeout=120`(2분)으로
+  통일. 캘리브레이션 신규 화구 기본값(`ui/ui_display.py`)과 `main.py`의 config 폴백 기본값도
+  동일하게 맞춰서, 앞으로 추가되는 화구도 자동으로 통일되도록 함.
 
 ---
 
@@ -112,13 +171,16 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
   "window_frames": 25,
   "trigger_frames": 14,
   "normalize_rms": true,
-  "normalize_ref_diag": 40.0
+  "normalize_ref_diag": 40.0,
+  "normalize_gamma": 1.0
 }
 ```
-`rms_threshold` 단위: `norm_rms = raw_rms × ref_diag / bbox_diag` 기준 비율.
+`rms_threshold` 단위: `norm_rms = raw_rms × (ref_diag / bbox_diag) ^ gamma` 기준 비율.
 - 정지 딸랑이 noise floor: norm_rms ≈ 0.015~0.13 (p99 ≈ 0.32)
 - threshold 0.20 = noise p90(0.19) 바로 위, window 투표(14/25)로 FP 추가 차단
 - `normalize_ref_diag=40.0`: 현재 영상 기준 평균 딸랑이 bbox 대각선(~37px) 기준. 해상도·줌 변경 시 이 값 재측정.
+- `normalize_gamma=1.0`(완전 보정, 기존 검증된 방식). 0.6 등으로 낮추면 보정 강도가 약해져
+  화구별 카메라 거리에 따라 감도가 달라짐 — 데이터(실측 bbox_d 분포) 없이 변경하지 말 것.
 
 ---
 
@@ -126,9 +188,17 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 
 ### 최우선: 현장 카메라 라이브 테스트
 - [ ] 딸랑이 움직임 → STEAMING 자동 전환 안정 확인
-- [ ] 초벌 완료 → DONE_FIRST → 재벌 딸랑이 재감지 → 재벌 시작 사이클 확인
+- [ ] 초벌 완료 → DONE_FIRST(냉각) → WAIT_SECOND(재벌대기) → 딸랑이 재감지 → 재벌 시작 사이클 확인
 - [ ] 타이머 잠금 확인 (사람 가림, 연기 발생 시 타이머 유지)
 - [ ] 밥솥 이탈 후 재거치 → EMPTY → POT_IDLE 전환 확인
+
+### UI 통합 캔버스 (2026-06-16 재설계) — 실제 디스플레이 환경 확인 필요
+- [ ] 배치 모드(`L`)에서 카드/카메라 드래그 체감 — 헤드리스 환경에선 로직만 검증, 실제 마우스
+      드래그 시 스냅 동작이 자연스러운지 확인
+- [ ] 카메라 리사이즈 핸들이 화면 배율(고DPI 등)에서도 클릭하기 충분히 큰지 확인
+- [ ] 화구 15개 이상으로 캔버스가 세로로 길어질 때 창 크기/배치 모드 사용성 확인
+- [ ] 딸랑이 진동 정규화 `normalize_gamma` 데이터 기반 재조정 — 매장에서 `diag_rms.py --frames 300`
+      돌려 화구별 `bbox_d` 분포를 ref_diag(40px)와 비교, 차이가 크면 gamma 재검토
 
 ### Phase 3 — 카메라 가변 N대 확장 (1~8+ 대)
 - 상세 설계: **[MULTI_CAMERA_PLAN.md](MULTI_CAMERA_PLAN.md)** 참조
@@ -213,6 +283,12 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 | 2026-06-15 | core/state_machine.py | **seconds_since_done / is_counting property 추가** — UI 유동 정렬(카운트다운 임박순 상단 + 완료 직후 N초 강조)용 조회 인터페이스. 상태 로직 변경 없음. |
 | 2026-06-15 | make_sounds.py, assets/sounds/ | **알림음 합성·음량 강화** — 초벌·재벌 공통 2시점(완료 30초 전 / 완료)용 `warn_30s`(2회 비프+상승)·`complete`(4음 팡파레) wav. 주방 소음 대응: 2·3배음 혼합 + sustain 엔벨로프 + 음량 0.9. 외부 음원·인터넷 불필요. 재생 연결은 UI 작업(0612UI작업.md 작업E). |
 | 2026-06-15 | 0612UI작업.md | **UI 개선 명세서 작성** — UI 작업을 별도 모델/세션에서 수행하기 위한 단독 문서. 항목 A~F(번호 확대·재벌대기 중복 제거·RMS dev전용·바로재벌 버튼·알림음·유동정렬) + 의존할 백엔드 API/상태 컨텍스트 + 테스트 체크리스트. |
+| 2026-06-16 | core/state_machine.py | **6→7상태, WAIT_SECOND 분리** — `DONE_FIRST`(냉각, 진동 무시)와 `WAIT_SECOND`(재벌대기, 진동 재활성)를 별도 상태로 분리. 기존엔 한 상태 안에서 플래그(`_seen_rest_after_first`)로 구분해 딸랑이가 잠깐 멈추면 바로 재벌로 오인할 위험이 있었음. `done_first_timeout`(기본 120초)로 자동 전환. |
+| 2026-06-16 | core/state_machine.py | **`pot_absent_threshold` debounce 도입** — DONE_FIRST/WAIT_SECOND/DONE_SECOND에서 pot 미감지 시 즉시 EMPTY가 아니라 연속 N프레임(기본 30, `_body_ttl` 15프레임과 합쳐 총 약 5초) 못 봐야 EMPTY 확정. 손/김에 순간 가려도 타이머 보존. |
+| 2026-06-16 | ui/ui_display.py | **UI 전면 재설계 — 좌/우 분리 패널 폐지 → 통합 캔버스** — 카메라 박스+화구 카드를 반칸(half-cell) 그리드 위에 함께 자유 배치. 매장 실제 배치(ㄱ자, 분리 블록 등) 재현 목적. 배치 모드(`L`키)로 드래그 이동(좌측상단 그랩 오프셋 기준, 미리보기=실제 스냅 위치 일치)·카메라 리사이즈(↘ 핸들) 지원. 카드 자동 정렬(urgency sort) 폐지, 저장된 위치 고정 표시로 전환. |
+| 2026-06-16 | ui/ui_display.py | **화구 카드 번호 확대** — 화구 번호를 카드에서 가장 크고 눈에 잘 보이는 요소로 변경(카드 높이에 비례하는 동적 폰트, 상단 대부분 차지, 가로 중앙). 상태/타이머는 번호 아래 보조 한 줄로 통합. 폰트 크기별 캐싱(`_dynamic_font`)으로 성능 영향 없음. |
+| 2026-06-16 | config/store_config.json | **`normalize_gamma` 0.6 → 1.0 환원** — 화구별 실제 bbox_diag 분포 데이터 없이 정해진 0.6값(거리별 보정 강도 완화)을 근거 부족으로 보류, 기존 검증된 완전 보정(1.0)으로 환원. 코드 자체는 유지 — 추후 `diag_rms.py`로 실측 후 데이터 기반 재조정 예정. |
+| 2026-06-16 | config/store_config.json, ui/ui_display.py, main.py | **타이머 값 전체 화구 통일** — 캘리브레이션으로 신규 추가된 화구(5~15번)가 구버전 기본값(countdown_second=300/done_first_timeout=600)을 가져가 1~4번(270/120)과 갈라져 있던 것을 270/120으로 통일. 캘리브레이션 신규화구 기본값·main.py config 폴백값도 동일하게 동기화. |
 
 ---
 
