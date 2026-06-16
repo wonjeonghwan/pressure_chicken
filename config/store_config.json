@@ -3,15 +3,9 @@
   "store_name": "압구정점",
   "sources": [
     {
-      "id": 5,
-      "type": "camera",
-      "index": 1,
-      "label": "Cam-5"
-    },
-    {
       "id": 6,
       "type": "camera",
-      "index": 2,
+      "index": 3,
       "label": "Cam-6"
     },
     {
@@ -19,6 +13,18 @@
       "type": "camera",
       "index": 0,
       "label": "Cam-7"
+    },
+    {
+      "id": 8,
+      "type": "camera",
+      "index": 2,
+      "label": "Cam-8"
+    },
+    {
+      "id": 9,
+      "type": "camera",
+      "index": 1,
+      "label": "Cam-9"
     }
   ],
   "ui": {
@@ -73,226 +79,282 @@
   "burners": [
     {
       "id": 1,
-      "source_id": 5,
+      "source_id": 6,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        225,
-        393,
-        637,
-        496
+        495,
+        468,
+        372,
+        403
       ]
     },
     {
       "id": 2,
-      "source_id": 5,
+      "source_id": 6,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        561,
-        66,
-        496,
-        438
+        725,
+        119,
+        336,
+        358
       ]
     },
     {
       "id": 3,
-      "source_id": 5,
+      "source_id": 6,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        853,
-        407,
-        390,
-        389
+        999,
+        482,
+        288,
+        274
       ]
     },
     {
       "id": 4,
-      "source_id": 5,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        1026,
-        159,
-        336,
-        332
-      ]
-    },
-    {
-      "id": 5,
-      "source_id": 5,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        1190,
-        429,
-        327,
-        283
-      ]
-    },
-    {
-      "id": 6,
       "source_id": 6,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        1176,
-        61,
-        261,
+        1154,
+        194,
+        248,
         270
       ]
     },
     {
-      "id": 7,
+      "id": 5,
       "source_id": 6,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        946,
-        141,
-        314,
-        327
+        1322,
+        477,
+        199,
+        221
+      ]
+    },
+    {
+      "id": 6,
+      "source_id": 7,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        968,
+        172,
+        226,
+        168
+      ]
+    },
+    {
+      "id": 7,
+      "source_id": 7,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        756,
+        287,
+        252,
+        164
       ]
     },
     {
       "id": 8,
-      "source_id": 6,
+      "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        1251,
-        274,
-        284,
-        345
+        1021,
+        353,
+        226,
+        208
       ]
     },
     {
       "id": 9,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        1004,
-        420,
-        340,
-        354
-      ]
-    },
-    {
-      "id": 10,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        1300,
-        592,
-        385,
-        447
-      ]
-    },
-    {
-      "id": 11,
       "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
-        322,
-        552,
-        350,
-        434
-      ]
-    },
-    {
-      "id": 12,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        663,
-        455,
-        314,
-        350
-      ]
-    },
-    {
-      "id": 13,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        442,
-        283,
-        279,
-        362
-      ]
-    },
-    {
-      "id": 14,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        707,
-        221,
-        283,
-        278
-      ]
-    },
-    {
-      "id": 15,
-      "source_id": 7,
-      "countdown_first": 720,
-      "countdown_second": 300,
-      "done_first_timeout": 600,
-      "pot_absent_threshold": 60,
-      "roi": [
-        548,
-        141,
-        217,
+        765,
+        526,
+        199,
         248
       ]
     },
     {
-      "id": 16,
+      "id": 10,
       "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 300,
       "done_first_timeout": 600,
       "pot_absent_threshold": 60,
       "roi": [
+        1088,
         752,
-        66,
-        234,
-        190
+        256,
+        265
+      ]
+    },
+    {
+      "id": 11,
+      "source_id": 8,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        836,
+        623,
+        203,
+        257
+      ]
+    },
+    {
+      "id": 12,
+      "source_id": 8,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        1088,
+        477,
+        274,
+        213
+      ]
+    },
+    {
+      "id": 13,
+      "source_id": 8,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        875,
+        367,
+        222,
+        185
+      ]
+    },
+    {
+      "id": 14,
+      "source_id": 8,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        1092,
+        238,
+        208,
+        155
+      ]
+    },
+    {
+      "id": 15,
+      "source_id": 8,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        889,
+        145,
+        203,
+        186
+      ]
+    },
+    {
+      "id": 16,
+      "source_id": 9,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        641,
+        97,
+        217,
+        203
+      ]
+    },
+    {
+      "id": 17,
+      "source_id": 9,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        818,
+        203,
+        177,
+        234
+      ]
+    },
+    {
+      "id": 18,
+      "source_id": 9,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        526,
+        274,
+        155,
+        208
+      ]
+    },
+    {
+      "id": 19,
+      "source_id": 9,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        703,
+        442,
+        172,
+        314
+      ]
+    },
+    {
+      "id": 20,
+      "source_id": 9,
+      "countdown_first": 720,
+      "countdown_second": 300,
+      "done_first_timeout": 600,
+      "pot_absent_threshold": 60,
+      "roi": [
+        296,
+        566,
+        221,
+        287
       ]
     }
   ],

@@ -136,10 +136,10 @@ class BurnerStateMachine:
                 self.state      = BurnerState.DONE_SECOND
 
         elif self.state == BurnerState.DONE_SECOND:
-            # 최종 상태 — pot 이탈 시에만 초기화 (debounce 적용)
-            if not pot_present:
+            # 무게추 5프레임 연속 미감지 → EMPTY (몸체보다 즉각 반응)
+            if not self.weight_detected:
                 self._pot_absent_count += 1
-                if self._pot_absent_count >= self._pot_absent_threshold:
+                if self._pot_absent_count >= 5:
                     self._pot_absent_count = 0
                     self.state = BurnerState.EMPTY
             else:
