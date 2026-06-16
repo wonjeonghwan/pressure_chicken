@@ -3,12 +3,12 @@
   "store_name": "압구정점",
   "sources": [
     {
-      "id": 5,
+      "id": 7,
       "type": "camera",
-      "index": 0,
-      "label": "Cam-5",
+      "index": 2,
+      "label": "Cam-7",
       "layout_pos": [
-        4,
+        7,
         0
       ],
       "layout_size": [
@@ -17,12 +17,40 @@
       ]
     },
     {
-      "id": 6,
+      "id": 8,
       "type": "camera",
-      "index": 0,
-      "label": "Cam-6",
+      "index": 3,
+      "label": "Cam-8",
       "layout_pos": [
         4,
+        0
+      ],
+      "layout_size": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": 9,
+      "type": "camera",
+      "index": 0,
+      "label": "Cam-9",
+      "layout_pos": [
+        4,
+        4
+      ],
+      "layout_size": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": 10,
+      "type": "camera",
+      "index": 1,
+      "label": "Cam-10",
+      "layout_pos": [
+        7,
         4
       ],
       "layout_size": [
@@ -67,7 +95,7 @@
     "reset_on_missing_box": false,
     "normalize_rms": true,
     "normalize_ref_diag": 40.0,
-    "normalize_gamma": 0.6
+    "normalize_gamma": 0.7
   },
   "frequency": {
     "enabled": false,
@@ -85,88 +113,88 @@
   "burners": [
     {
       "id": 1,
-      "source_id": 5,
+      "source_id": 8,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "roi": [
+        438,
+        372,
+        462,
+        498
+      ],
       "grid_pos": [
         0,
         0
-      ],
-      "roi": [
-        43,
-        64,
-        92,
-        79
       ]
     },
     {
       "id": 2,
-      "source_id": 5,
+      "source_id": 8,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "roi": [
+        642,
+        72,
+        480,
+        396
+      ],
       "grid_pos": [
         2,
         1
-      ],
-      "roi": [
-        254,
-        130,
-        117,
-        101
       ]
     },
     {
       "id": 3,
-      "source_id": 5,
+      "source_id": 8,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "roi": [
+        888,
+        414,
+        396,
+        372
+      ],
       "grid_pos": [
         0,
         2
-      ],
-      "roi": [
-        112,
-        228,
-        92,
-        91
       ]
     },
     {
       "id": 4,
-      "source_id": 5,
+      "source_id": 8,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
+      "roi": [
+        1050,
+        156,
+        336,
+        324
+      ],
       "grid_pos": [
         2,
         3
-      ],
-      "roi": [
-        231,
-        371,
-        97,
-        69
       ]
     },
     {
       "id": 5,
-      "source_id": 5,
+      "source_id": 8,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        486,
-        240,
-        108,
-        102
+        1248,
+        420,
+        246,
+        300
       ],
       "grid_pos": [
         0,
@@ -175,16 +203,16 @@
     },
     {
       "id": 6,
-      "source_id": 5,
+      "source_id": 9,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        438,
-        576,
-        36,
-        42
+        930,
+        156,
+        252,
+        276
       ],
       "grid_pos": [
         2,
@@ -193,16 +221,16 @@
     },
     {
       "id": 7,
-      "source_id": 5,
+      "source_id": 9,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        648,
-        756,
-        192,
-        138
+        696,
+        270,
+        306,
+        294
       ],
       "grid_pos": [
         0,
@@ -211,16 +239,16 @@
     },
     {
       "id": 8,
-      "source_id": 5,
+      "source_id": 9,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        912,
-        252,
-        354,
-        354
+        948,
+        390,
+        300,
+        300
       ],
       "grid_pos": [
         2,
@@ -229,16 +257,16 @@
     },
     {
       "id": 9,
-      "source_id": 5,
+      "source_id": 9,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        1380,
-        300,
-        240,
-        282
+        648,
+        540,
+        348,
+        378
       ],
       "grid_pos": [
         0,
@@ -247,16 +275,16 @@
     },
     {
       "id": 10,
-      "source_id": 5,
+      "source_id": 9,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        1278,
-        738,
-        162,
-        132
+        978,
+        684,
+        372,
+        384
       ],
       "grid_pos": [
         2,
@@ -265,91 +293,181 @@
     },
     {
       "id": 11,
-      "source_id": 6,
+      "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        252,
-        186,
-        234,
-        198
+        744,
+        630,
+        390,
+        438
       ],
       "grid_pos": [
         0,
-        12
+        14
       ]
     },
     {
       "id": 12,
-      "source_id": 6,
+      "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        582,
-        588,
-        162,
-        126
+        1068,
+        474,
+        300,
+        360
       ],
       "grid_pos": [
         1,
-        14
-      ]
-    },
-    {
-      "id": 13,
-      "source_id": 6,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1104,
-        294,
-        168,
-        126
-      ],
-      "grid_pos": [
-        2,
         12
       ]
     },
     {
-      "id": 14,
-      "source_id": 6,
+      "id": 13,
+      "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        1596,
-        84,
-        78,
-        162
+        804,
+        336,
+        336,
+        336
       ],
       "grid_pos": [
-        3,
+        2,
         14
       ]
     },
     {
-      "id": 15,
-      "source_id": 6,
+      "id": 14,
+      "source_id": 7,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        1374,
-        588,
-        90,
-        60
+        1074,
+        258,
+        258,
+        282
+      ],
+      "grid_pos": [
+        3,
+        12
+      ]
+    },
+    {
+      "id": 15,
+      "source_id": 7,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        870,
+        180,
+        228,
+        216
       ],
       "grid_pos": [
         4,
+        14
+      ]
+    },
+    {
+      "id": 16,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        618,
+        108,
+        258,
+        264
+      ],
+      "grid_pos": [
+        5,
+        12
+      ]
+    },
+    {
+      "id": 17,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        756,
+        252,
+        294,
+        282
+      ],
+      "grid_pos": [
+        6,
+        14
+      ]
+    },
+    {
+      "id": 18,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        462,
+        276,
+        276,
+        336
+      ],
+      "grid_pos": [
+        7,
+        12
+      ]
+    },
+    {
+      "id": 19,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        612,
+        480,
+        330,
+        408
+      ],
+      "grid_pos": [
+        8,
+        14
+      ]
+    },
+    {
+      "id": 20,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        198,
+        534,
+        378,
+        420
+      ],
+      "grid_pos": [
+        9,
         12
       ]
     }

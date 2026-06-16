@@ -109,6 +109,7 @@ class UIDisplay:
         self._canvas_origin: tuple[int, int] = (0, 0)
         self._half_cell_w: int = 0
         self._half_cell_h: int = 0
+        self._layout_rows: int = 1  # 보이는 캔버스 영역의 반칸 행 수 (매 프레임 갱신)
 
         # 외부 콜백
         self.on_camera_switch = None
@@ -200,12 +201,19 @@ class UIDisplay:
         print("[UI] 캘리브레이션 가이드 모드 시작")
 
     def _renumber_calib(self) -> None:
-        """저장 정책: source_id 오름차순 + 같은 카메라 안에선 list 위치(=그린 순서) 유지.
+        """저장 정책: 카메라 화면상 배치 순서(좌상단→우하단) + 같은 카메라 안에선 list 위치(=그린 순서) 유지.
 
-        결과 예시:
-            Cam-0 화구 2개 → ID 1, 2
-            Cam-1 화구 3개 → ID 3, 4, 5
-            Cam-2 화구 1개 → ID 6
+        주의: source_id는 카메라가 추가된 순서(내부 식별자)일 뿐 화면에 보이는 위치와 무관함
+        (카메라는 배치 모드(L)에서 자유롭게 이동 가능). source_id로 정렬하면 사용자가 화면에서
+        "첫 번째 카메라"라고 인식하는 카메라와 실제 ID 1번을 받는 카메라가 어긋나는 버그가
+        있었음 — 예: 화면상 1번째 카메라에 1~5번을 그렸는데 2번째 카메라가 source_id가 더
+        작다는 이유로 1~5번을 가져가 버림. 화면 배치(layout_pos) 기준으로 정렬해 사용자가
+        보는 순서와 부여되는 번호가 항상 일치하도록 한다.
+
+        결과 예시 (화면 좌상단부터):
+            화면 1번째 카메라 화구 2개 → ID 1, 2
+            화면 2번째 카메라 화구 3개 → ID 3, 4, 5
+            화면 3번째 카메라 화구 1개 → ID 6
 
         선택된 화구 인덱스도 재정렬 후 동일 화구를 가리키도록 갱신.
         """
@@ -215,8 +223,8 @@ class UIDisplay:
             else None
         )
 
-        # source_id 오름차순 정렬 (안정 정렬이라 같은 source 안의 그린 순서는 보존됨)
-        self._calib_burners.sort(key=lambda b: (b.get("source_id", 0)))
+        # 화면 배치(row, col) 오름차순 정렬 (안정 정렬이라 같은 카메라 안의 그린 순서는 보존됨)
+        self._calib_burners.sort(key=lambda b: self._camera_layout_pos(b.get("source_id", 0)))
 
         # 1부터 ID 재부여
         for i, b in enumerate(self._calib_burners):
@@ -284,12 +292,16 @@ class UIDisplay:
         return list(_DEFAULT_CAM_SIZE)
 
     def _default_camera_pos(self, src_id: int) -> list[int]:
-        """layout_pos 미지정 카메라 기본 위치 — 화구 영역 아래쪽에 가로로 배치."""
+        """layout_pos 미지정 카메라 기본 위치 — 화구 영역 아래쪽부터, 그리드 폭(layout_cols)을
+        넘기지 않도록 줄바꿈하며 배치."""
         sources = self.config_data.get("sources", [])
         idx = next((i for i, s in enumerate(sources) if s["id"] == src_id), 0)
-        cam_w = _DEFAULT_CAM_SIZE[1]
+        cam_h, cam_w = _DEFAULT_CAM_SIZE
         base_row = 8  # 화구 기본 배치 영역(약 4줄) 아래 여유
-        return [base_row, idx * cam_w]
+        cols_per_row = max(1, self._layout_cols // cam_w)
+        row_group = idx // cols_per_row
+        idx_in_row = idx % cols_per_row
+        return [base_row + row_group * cam_h, idx_in_row * cam_w]
 
     def _camera_layout_pos(self, src_id: int) -> list[int]:
         sc = next((s for s in self.config_data.get("sources", []) if s["id"] == src_id), None)
@@ -343,17 +355,27 @@ class UIDisplay:
         if getattr(self, "on_config_reloaded", None):
             self.on_config_reloaded(self.config_data)
 
-    def _layout_cell_at(self, pos: tuple[int, int]) -> tuple[int, int] | None:
-        """픽셀 좌표(좌측상단 기준 앵커) → (row, col) 반칸 그리드 좌표. 캔버스 원점/반칸크기 기준."""
+    def _layout_cell_at(
+        self, pos: tuple[int, int], size: tuple[int, int] = (1, 1),
+    ) -> tuple[int, int] | None:
+        """픽셀 좌표(좌측상단 기준 앵커) → (row, col) 반칸 그리드 좌표. 캔버스 원점/반칸크기 기준.
+
+        size=(rows, cols): 배치할 오브젝트의 반칸 크기. 오브젝트가 그리드 밖으로
+        삐져나가 화면 밖에서 찾을 수 없게 되는 일을 막기 위해, 우측/하단 경계 안에
+        들어오도록 좌표를 함께 clamp한다.
+        """
         if self._half_cell_w <= 0 or self._half_cell_h <= 0:
             return None
+        size_rows, size_cols = size
         gx, gy = self._canvas_origin
         rel_x = max(0, pos[0] - gx)
         rel_y = max(0, pos[1] - gy)
         col = int(rel_x // self._half_cell_w)
         row = int(rel_y // self._half_cell_h)
-        col = max(0, min(self._layout_cols - 1, col))
-        row = max(0, row)
+        max_col = max(0, self._layout_cols - size_cols)
+        max_row = max(0, self._layout_rows - size_rows)
+        col = max(0, min(max_col, col))
+        row = max(0, min(max_row, row))
         return (row, col)
 
     def _layout_drag_anchor(self) -> tuple[int, int]:
@@ -369,8 +391,10 @@ class UIDisplay:
         row, col = self._layout_camera_positions.get(src_id, self._camera_layout_pos(src_id))
         ox = gx + col * self._half_cell_w
         oy = gy + row * self._half_cell_h
-        cols = max(2, round((drag_pos[0] - ox) / self._half_cell_w))
-        rows = max(2, round((drag_pos[1] - oy) / self._half_cell_h))
+        max_cols = max(2, self._layout_cols - col)
+        max_rows = max(2, self._layout_rows - row)
+        cols = max(2, min(max_cols, round((drag_pos[0] - ox) / self._half_cell_w)))
+        rows = max(2, min(max_rows, round((drag_pos[1] - oy) / self._half_cell_h)))
         return [rows, cols]
 
     def _show_toast(self, msg: str, duration_s: float = 2.5) -> None:
@@ -663,10 +687,10 @@ class UIDisplay:
             else:
                 ox, oy = self._layout_drag_offset
                 anchor = (pos[0] - ox, pos[1] - oy)
-                target = self._layout_cell_at(anchor)
-                if target is not None:
-                    if self._layout_drag_kind == 'burner':
-                        bid = self._layout_drag_id
+                if self._layout_drag_kind == 'burner':
+                    bid = self._layout_drag_id
+                    target = self._layout_cell_at(anchor, size=(2, 2))
+                    if target is not None:
                         occupant = next(
                             (b for b, p in self._layout_positions.items()
                              if b != bid and tuple(p) == target),
@@ -675,8 +699,11 @@ class UIDisplay:
                         if occupant is not None:
                             self._layout_positions[occupant] = list(self._layout_positions[bid])
                         self._layout_positions[bid] = [target[0], target[1]]
-                    elif self._layout_drag_kind == 'camera':
-                        sid = self._layout_drag_id
+                elif self._layout_drag_kind == 'camera':
+                    sid = self._layout_drag_id
+                    cam_size = self._layout_camera_sizes.get(sid, self._camera_layout_size(sid))
+                    target = self._layout_cell_at(anchor, size=tuple(cam_size))
+                    if target is not None:
                         self._layout_camera_positions[sid] = [target[0], target[1]]
             self._layout_drag_kind = None
             self._layout_drag_id = None
@@ -1098,6 +1125,7 @@ class UIDisplay:
         gx, gy = self._canvas_origin
         cols = max(1, self._layout_cols)
         rows = max(1, canvas_h // self._half_cell_h) if self._half_cell_h else 1
+        self._layout_rows = rows
 
         # 그리드 라인
         for c in range(cols + 1):
@@ -1123,7 +1151,7 @@ class UIDisplay:
             is_active = self._layout_drag_id == src_id
             if is_active and self._layout_drag_kind == 'camera':
                 anchor = self._layout_drag_anchor()
-                target = self._layout_cell_at(anchor)
+                target = self._layout_cell_at(anchor, size=(rsize, csize))
                 if target is not None:
                     ox = gx + target[1] * self._half_cell_w
                     oy_box = gy + target[0] * self._half_cell_h
@@ -1167,7 +1195,7 @@ class UIDisplay:
             is_dragging = self._layout_drag_kind == 'burner' and self._layout_drag_id == bid
             if is_dragging:
                 anchor = self._layout_drag_anchor()
-                target = self._layout_cell_at(anchor)
+                target = self._layout_cell_at(anchor, size=(2, 2))
                 if target is not None:
                     x = gx + target[1] * self._half_cell_w
                     y = gy + target[0] * self._half_cell_h
