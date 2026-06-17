@@ -157,7 +157,7 @@ class BurnerStateMachine:
         수동 타이머 강제 시작/진행.
         EMPTY / POT_IDLE               → 초벌 시작
         POT_STEAMING_FIRST             → 초벌 즉시 완료
-        DONE_FIRST                     → 냉각 대기 스킵하고 '바로 재벌' 즉시 시작
+        DONE_FIRST                     → 냉각 대기 스킵하고 재벌 대기(WAIT_SECOND)로 이동
         WAIT_SECOND                    → 재벌 강제 시작
         POT_STEAMING_SECOND            → 재벌 즉시 완료
         """
@@ -166,9 +166,9 @@ class BurnerStateMachine:
         elif self.state == BurnerState.POT_STEAMING_FIRST:
             self._countdown_end = time.monotonic()
         elif self.state == BurnerState.DONE_FIRST:
-            # '바로 재벌' — 10분 냉각 대기를 건너뛰고 곧장 재벌 카운트다운 시작
+            # 냉각 대기를 건너뛰고 재벌 대기 상태로 이동 — 딸랑이 감지가 재활성되며 재벌 준비
             self._done_first_end = None
-            self._start_second()
+            self.state = BurnerState.WAIT_SECOND
         elif self.state == BurnerState.WAIT_SECOND:
             self._start_second()
         elif self.state == BurnerState.POT_STEAMING_SECOND:

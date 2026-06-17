@@ -166,13 +166,12 @@ class OpticalFlowDetector:
         self.last_rms = rms
 
         # ── 5. 크기 정규화 + RMS EMA 스무딩 ─────────────────────────────
-        # normalize_rms=True: norm = rms × (ref_diag / bbox_diag) ^ gamma
-        #   - bbox가 클수록(해상도↑, 카메라 가까움) 나눠서 줄이고 ref_diag로 다시 곱해
-        #     스케일을 유지하므로 threshold 값을 그대로 사용 가능
-        #   - gamma=1.0: 완전 보정 (구 방식). gamma<1.0: 보정 강도를 줄여
-        #     카메라 거리에 따른 과보정(가까우면 둔감)/저보정(멀면 예민)을 완화
+        # normalize_rms=True: norm = rms × (bbox_diag / ref_diag) ^ gamma
+        #   - bbox가 클수록(가까운 냄비) → ratio > 1 → RMS 증폭 → 더 민감
+        #   - bbox가 작을수록(먼 냄비)   → ratio < 1 → RMS 감쇠 → 더 둔감
+        #   - gamma=0: 정규화 없음. gamma=1: 거리 효과 완전 반영.
         if self._normalize_rms and bbox_diag > 0:
-            ratio = self._normalize_ref_diag / bbox_diag
+            ratio = bbox_diag / self._normalize_ref_diag
             if self._normalize_gamma != 1.0:
                 ratio = ratio ** self._normalize_gamma
             norm_rms = rms * ratio

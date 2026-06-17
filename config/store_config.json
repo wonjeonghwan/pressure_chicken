@@ -86,7 +86,7 @@
     "farneback_iterations": 3,
     "farneback_poly_n": 5,
     "farneback_poly_sigma": 1.2,
-    "rms_threshold": 0.2,
+    "rms_threshold": 0.3,
     "rms_ema_alpha": 0.5,
     "pos_ema_alpha": 0.3,
     "max_box_jump_ratio": 0.5,
@@ -95,7 +95,7 @@
     "reset_on_missing_box": false,
     "normalize_rms": true,
     "normalize_ref_diag": 40.0,
-    "normalize_gamma": 0.7
+    "normalize_gamma": -0.1
   },
   "frequency": {
     "enabled": false,
@@ -117,7 +117,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         438,
         372,
@@ -135,7 +135,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         642,
         72,
@@ -153,7 +153,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         888,
         414,
@@ -171,7 +171,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         1050,
         156,
@@ -189,7 +189,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         1248,
         420,
@@ -207,7 +207,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         930,
         156,
@@ -225,7 +225,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         696,
         270,
@@ -243,7 +243,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         948,
         390,
@@ -261,7 +261,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         648,
         540,
@@ -279,7 +279,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         978,
         684,
@@ -297,7 +297,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         744,
         630,
@@ -315,7 +315,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         1068,
         474,
@@ -333,7 +333,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         804,
         336,
@@ -351,7 +351,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         1074,
         258,
@@ -369,7 +369,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         870,
         180,
@@ -387,7 +387,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         618,
         108,
@@ -405,7 +405,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         756,
         252,
@@ -423,7 +423,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         462,
         276,
@@ -441,7 +441,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         612,
         480,
@@ -459,7 +459,7 @@
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
+      "pot_absent_threshold": 5,
       "roi": [
         198,
         534,
