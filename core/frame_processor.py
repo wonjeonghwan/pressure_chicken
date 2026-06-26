@@ -235,23 +235,30 @@ class FrameProcessor:
             bodies  = [d for d in dets if d.class_id == CLASS_POT_BODY   and d.confidence >= 0.3]
             weights = [d for d in dets if d.class_id == CLASS_POT_WEIGHT and d.confidence >= 0.25]
 
-            # ── 밥솥 매칭 (ROI 기반) ─────────────────────────────────────
+            # ── 밥솥 매칭 (ROI 기반, 독점 그리디) ───────────────────────
+            # 가장 가까운 화구가 body를 독점 — 인접 화구 간섭 방지
             matched_bodies: dict[int, tuple[int, int, int, int]] = {}
+            body_candidates: list[tuple[float, int, int]] = []  # (dist, bid, body_idx)
             for bid in burner_ids:
                 roi = self._burner_map[bid].get("roi")
                 if not roi:
                     continue
                 rx, ry, rw, rh = roi
-                best_dist, best_body = float('inf'), None
-                for b in bodies:
-                    mx, my = rw * 0.2, rh * 0.2
-                    if (rx - mx <= b.cx <= rx + rw + mx) and (ry - my <= b.cy <= ry + rh + my):
+                for bi, b in enumerate(bodies):
+                    if (rx <= b.cx <= rx + rw) and (ry <= b.cy <= ry + rh):
                         dist = math.hypot(b.cx - (rx + rw / 2), b.cy - (ry + rh / 2))
-                        if dist < best_dist:
-                            best_dist, best_body = dist, b
-                if best_body is not None:
-                    matched_bodies[bid] = (int(best_body.x1), int(best_body.y1),
-                                           int(best_body.x2), int(best_body.y2))
+                        body_candidates.append((dist, bid, bi))
+
+            body_candidates.sort(key=lambda t: t[0])
+            used_bodies: set[int] = set()
+            used_body_bids: set[int] = set()
+            for dist, bid, bi in body_candidates:
+                if bid in used_body_bids or bi in used_bodies:
+                    continue
+                b = bodies[bi]
+                matched_bodies[bid] = (int(b.x1), int(b.y1), int(b.x2), int(b.y2))
+                used_bodies.add(bi)
+                used_body_bids.add(bid)
 
             # ── 딸랑이 독점 매칭 (x축 거리 그리디) ──────────────────────
             matched_has_weight: dict[int, tuple[bool, tuple, np.ndarray | None]] = {}
@@ -284,13 +291,28 @@ class FrameProcessor:
                 if bid not in matched_has_weight:
                     matched_has_weight[bid] = (False, (0, 0, 0, 0), None)
 
+            # 완료 상태 화구: weight ROI 직접 탐지 (body 종속 없이 독립 체크)
+            _DONE_STATES = (BurnerState.DONE_FIRST, BurnerState.WAIT_SECOND, BurnerState.DONE_SECOND)
+            weight_in_roi: dict[int, bool] = {}
+            for bid in burner_ids:
+                if self._registry.get(bid).state not in _DONE_STATES:
+                    continue
+                roi = self._burner_map[bid].get("roi")
+                if not roi:
+                    continue
+                rx, ry, rw, rh = roi
+                weight_in_roi[bid] = any(
+                    rx <= w.cx <= rx + rw and ry <= w.cy <= ry + rh
+                    for w in weights
+                )
+
             # ── Phase 2: optical flow 움직임 판별 ────────────────────────
             for bid in burner_ids:
                 if bid in matched_bodies and bid in matched_has_weight:
                     x1, y1, x2, y2 = matched_bodies[bid]
                     has_wt, w_box, mask_xy = matched_has_weight[bid]
                     self.last_matched_boxes[bid] = (x1, y1, x2, y2)
-                    self._body_ttl[bid] = 15
+                    self._body_ttl[bid] = 5
 
                     if has_wt:
                         self.last_weight_boxes[bid] = w_box
@@ -313,7 +335,10 @@ class FrameProcessor:
                     # 최종 진동 판정 (Phase 2 단독 수행)
                     vibrating = vibrating_p2
 
-                    detections[bid] = (True, vibrating)
+                    if bid in weight_in_roi:
+                        detections[bid] = (weight_in_roi[bid], vibrating)
+                    else:
+                        detections[bid] = (True, vibrating)
 
                     bsm = self._registry.get(bid)
                     bsm.weight_detected = has_wt
@@ -323,7 +348,14 @@ class FrameProcessor:
                     bsm.angle_deviation = self._oflow[bid].last_normalized_rms
 
                 else:
-                    if self._body_ttl.get(bid, 0) > 0 and bid in self.last_matched_boxes:
+                    if bid in weight_in_roi:
+                        # 완료 상태: body 없어도 weight ROI 직접 탐지로 pot_present 결정
+                        vibrating, _ = self._oflow[bid].update(stabilized, None)
+                        detections[bid] = (weight_in_roi[bid], vibrating)
+                        bsm = self._registry.get(bid)
+                        bsm.weight_detected = weight_in_roi[bid]
+                        bsm.vibration_score = self._oflow[bid].score
+                    elif self._body_ttl.get(bid, 0) > 0 and bid in self.last_matched_boxes:
                         self._body_ttl[bid] -= 1
                         vibrating, _ = self._oflow[bid].update(stabilized, None)
                         detections[bid] = (True, vibrating)

@@ -268,6 +268,18 @@ class UIDisplay:
 
     # ── 통합 캔버스 배치 모드 (카메라 박스 + 화구 카드, 반칸 단위) ──────────
     # 화구 카드 = 2×2 반칸 고정 크기. 카메라 박스 = source별 layout_size (반칸 단위).
+    def _max_grid_rows(self) -> int:
+        """config 기준 콘텐츠 최대 row 범위 (반칸 단위). _half_cell_h 계산에 사용."""
+        max_row = 0
+        for sc in self.config_data.get("sources", []):
+            r, _ = self._camera_layout_pos(sc["id"])
+            rows, _ = self._camera_layout_size(sc["id"])
+            max_row = max(max_row, r + rows)
+        for b in self.config_data.get("burners", []):
+            r, _ = self._burner_grid_pos(b["id"])
+            max_row = max(max_row, r + 2)
+        return max(max_row, 10)  # 최소 10행 보장
+
     def _default_grid_pos(self, bid: int) -> list[int]:
         """grid_pos 미지정 화구의 기본 위치 — 등장 순서로 2반칸씩 가로로 배치."""
         burners = self.config_data.get("burners", [])
@@ -756,7 +768,10 @@ class UIDisplay:
         # 통합 캔버스 좌표계 (반칸 그리드) 갱신 — 매 프레임 창 크기에 맞춰 재계산
         self._canvas_origin = (0, canvas_y0)
         self._half_cell_w = max(1, sw // max(1, self._layout_cols))
-        self._half_cell_h = max(1, int(self._half_cell_w * _HALF_CELL_ASPECT))
+        _h_from_width  = max(1, int(self._half_cell_w * _HALF_CELL_ASPECT))
+        _max_rows      = self._max_grid_rows()
+        _h_from_height = max(1, canvas_h // max(1, _max_rows))
+        self._half_cell_h = min(_h_from_width, _h_from_height)
 
         if self.calibration_mode:
             self._draw_canvas_cameras(frames or {}, processor, sw, canvas_y0, canvas_h, force_all=True)
@@ -765,7 +780,8 @@ class UIDisplay:
             self._draw_layout_editor(frames or {}, processor, sw, canvas_y0, canvas_h)
         else:
             self._draw_canvas_cameras(frames or {}, processor, sw, canvas_y0, canvas_h, force_all=False)
-            self._draw_canvas_burners()
+            if self._focus_camera_id is None:
+                self._draw_canvas_burners()
 
         # Toast (있으면)
         if self._toast_msg and time.monotonic() < self._toast_until:
