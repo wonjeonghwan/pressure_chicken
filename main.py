@@ -23,7 +23,8 @@ import cv2
 import pygame
 
 from sources.video_source import VideoSource
-from sources.camera_utils import save_config, switch_camera
+from sources.camera_utils import save_config, switch_camera, find_unused_index
+from sources.mf_enum import list_cameras, find_unclaimed
 from core.state_machine import BurnerRegistry
 from core.detector import BurnerDetector
 from core.frame_processor import FrameProcessor
@@ -89,22 +90,26 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     sources = {}
     cam_indices = {}
 
+    # 시작 시 PnP 카메라 목록 — 연결 확인 및 경고용 (열기는 하지 않음)
+    _pnp_locations = {c.location for c in list_cameras()} if sys.platform == "win32" else set()
+
     for sc in sources_cfg:
         vs = VideoSource(sc)
         vs.open()
-        
+
         if vs.failed and sc.get("type", "camera") == "camera":
-            print(f"[main] 소스 {sc['id']} 실패. 대체 카메라 탐색...")
-            available = VideoSource.find_available_cameras()
-            if available:
-                sc["index"] = available[0]
-                vs = VideoSource(sc)
-                vs.open()
-                
+            stored_loc = sc.get("device_location", "")
+            if stored_loc and _pnp_locations and stored_loc not in _pnp_locations:
+                print(f"[main] 소스 {sc['id']}: 저장된 카메라(포트 {stored_loc})가 현재 연결되어 있지 않습니다.")
+            else:
+                print(f"[main] 소스 {sc['id']} 열기 실패 (index={sc.get('index')}). 빈 소스로 동작합니다.")
+
         if sc.get("type") == "file":
             skip = max(1, round(vs.fps / target_fps))
             sc["_skip_frames"] = skip
             print(f"[main] 파일 소스 {sc['id']}: skip={skip}")
+        elif not vs.failed:
+            vs.start_capture(fps=target_fps)
 
         sources[sc["id"]] = vs
         if sc.get("type", "camera") == "camera":
@@ -177,7 +182,6 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     print("[main] 대시보드 시작. Q 로 종료.")
 
     import time as _time
-    _last_frame      = 0.0
     _last_detect     = 0.0
     _DETECT_INTERVAL = _FRAME_INTERVAL
 
@@ -200,6 +204,10 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
                 sources, src_id, cam_indices[src_id],
                 config=config, config_path=config.get("_path")
             )
+            # switch_camera() 가 새 VideoSource를 sources[src_id]에 넣음 → 스레드 시작
+            new_vs = sources.get(src_id)
+            if new_vs and not new_vs.failed:
+                new_vs.start_capture(fps=target_fps)
             
     def handle_config_reloaded(new_cfg: dict):
         nonlocal burners_cfg, registry, processor
@@ -225,42 +233,61 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     display.on_config_reloaded = handle_config_reloaded
 
     def add_camera() -> bool:
-        """안전한 카메라 추가 — 이미 열린 카메라 핸들을 건드리지 않음.
-
-        기존 구현은 `VideoSource.find_available_cameras`를 호출해 0~9를 전부 열고/닫았는데,
-        이 과정에서 이미 메인 프로그램이 잡고 있던 카메라 핸들이 DSHOW 백엔드에 의해
-        강제 회수되며 'frame 없음' 상태로 빠지는 버그가 있었음.
-
-        개선: 사용 중이 아닌 인덱스만 한 번씩 직접 시도. 이미 열린 카메라는 건드리지 않음.
         """
-        used_indices = {sc.get("index") for sc in config.get("sources", []) if sc.get("type", "camera") == "camera"}
+        카메라 추가 — PnP LocationInfo 기반 안정 ID 매핑.
+
+        1. PnP로 미등록 물리 카메라(location)를 파악
+        2. 미사용 MSMF index에서 실제 프레임이 나오는 것을 탐색
+        3. (미등록 카메라 1대 ↔ 미사용 index 1개) → 동일 물리 장치로 간주하고 매핑 저장
+        """
+        used_indices  = {sc.get("index") for sc in config.get("sources", [])
+                         if sc.get("type", "camera") == "camera"}
+        used_locations = {sc.get("device_location", "") for sc in config.get("sources", [])
+                          if sc.get("type", "camera") == "camera" and sc.get("device_location")}
         used_ids = {sc["id"] for sc in config.get("sources", [])}
         next_src_id = max(used_ids) + 1 if used_ids else 0
 
-        for candidate in range(10):
-            if candidate in used_indices:
-                continue
-            new_sc = {"id": next_src_id, "type": "camera", "index": candidate, "label": f"Cam-{next_src_id}"}
-            vs = VideoSource(new_sc)
-            vs.open()
-            if vs.failed:
-                vs.release()
-                continue
-            # 첫 frame까지 받아봐야 실제 사용 가능한 인덱스. 일부 가상 카메라는 open만 성공
-            ok, _frame = vs.read()
-            if not ok:
-                vs.release()
-                continue
-            sources[next_src_id] = vs
-            cam_indices[next_src_id] = candidate
-            config.setdefault("sources", []).append(new_sc)
-            save_config(config.get("_path"), config)
-            handle_config_reloaded(config)
-            print(f"[main] 카메라 추가됨: src#{next_src_id} = index {candidate}")
-            return True
+        # ── PnP로 미등록 물리 카메라 확인 ─────────────────────────────────────
+        unclaimed = find_unclaimed(used_locations)
+        if not unclaimed:
+            # PnP 열거 실패(비-Windows 등)이면 연결 카메라 수로 판단
+            all_cams = list_cameras()
+            if not all_cams:
+                # 비-Windows: PnP 없이 index 탐색만
+                pass
+            else:
+                print(f"[main] 추가할 카메라 없음 — 미등록 장치 없음 (연결 {len(all_cams)}대, 등록 {len(used_locations)}대)")
+                return False
 
-        print(f"[main] 추가 가능한 카메라 인덱스 없음 (사용중: {sorted(used_indices)})")
-        return False
+        # ── 미사용 MSMF index 탐색 (기존 핸들 건드리지 않음) ─────────────────
+        result = find_unused_index(used_indices)
+        if result is None:
+            print(f"[main] 추가할 카메라 없음 — 미사용 index 없음 (사용중: {sorted(used_indices)})")
+            return False
+
+        new_index, vs = result
+
+        # ── 물리 카메라 ↔ index 매핑 저장 ────────────────────────────────────
+        device_location = unclaimed[0].location if unclaimed else ""
+        device_name     = unclaimed[0].name     if unclaimed else "Camera"
+        if len(unclaimed) > 1:
+            print(f"[main] 경고: 미등록 카메라 {len(unclaimed)}대 — 첫 번째를 index {new_index}에 매핑")
+
+        new_sc = {
+            "id":              next_src_id,
+            "type":            "camera",
+            "index":           new_index,
+            "label":           f"Cam-{next_src_id}",
+            "device_location": device_location,
+        }
+        vs.start_capture(fps=target_fps)
+        sources[next_src_id]    = vs
+        cam_indices[next_src_id] = new_index
+        config.setdefault("sources", []).append(new_sc)
+        save_config(config.get("_path"), config)
+        handle_config_reloaded(config)
+        print(f"[main] 카메라 추가: src#{next_src_id} = index {new_index}  location={device_location!r}")
+        return True
 
     def remove_camera(source_id: int) -> bool:
         """지정된 source_id의 카메라 제거 + 묶인 화구 함께 제거 + 핫리로드."""
@@ -298,15 +325,17 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
             # 만약 캘리브레이션 모드에서 값이 재설정되었다면 (심리스 부분 재실행은 추후 고도화, 현재는 UI만 유지)
             # 여기서는 비디오 일시정지 상태가 아니면 프레임 Update
             if not display.video_paused:
-                if now - _last_frame >= _FRAME_INTERVAL:
-                    current_frames = processor.read_frames()
-                    _last_frame = now
-                    frame_count += 1
-
                 if not display.calibration_mode:
                     if now - _last_detect >= _DETECT_INTERVAL:
+                        # 카메라 소스: get_latest() 비블로킹 — 캡처 스레드 버퍼에서 즉시 반환
+                        # 파일 소스: read() 동기 — 기존 방식 유지
+                        current_frames = processor.read_frames()
                         processor.detect_and_update()
+                        frame_count += 1
                         _last_detect = now
+                else:
+                    # 캘리브레이션 모드: 감지 없이 화면만 갱신
+                    current_frames = processor.read_frames()
 
             display.render(frames=current_frames, processor=processor)
 

@@ -90,6 +90,10 @@ class UIDisplay:
         self._calib_dragging = False
         self._calib_burners = []
         self._calib_selected_idx: int | None = None  # 선택된 화구 인덱스
+        self._calib_op: str | None = None            # 'new' | 'move' | 'resize'
+        self._calib_resize_dir: str | None = None    # 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'
+        self._calib_op_origin: list | None = None    # 드래그 시작 시점 roi [x,y,w,h]
+        self._calib_op_start: tuple | None = None    # 드래그 시작 시점 video pos (vx, vy)
 
         # 통합 캔버스 배치 모드 — 카메라 박스 + 화구 카드를 반칸(half-cell) 단위 그리드에 자유 배치
         self.layout_mode = False
@@ -196,6 +200,10 @@ class UIDisplay:
         self._calib_drag_end = None
         self._calib_dragging = False
         self._calib_selected_idx = None
+        self._calib_op = None
+        self._calib_resize_dir = None
+        self._calib_op_origin = None
+        self._calib_op_start = None
         self._selected_id = None
         self._selected_camera_id = None  # 캘리브 진입 시 카메라 선택 해제
         print("[UI] 캘리브레이션 가이드 모드 시작")
@@ -585,7 +593,21 @@ class UIDisplay:
             v_pos = self._to_video_pos(pos)
             if v_pos:
                 src_id, vx, vy = v_pos
-                # 기존 ROI 클릭 확인 (역순 — 위에 그려진 게 우선)
+
+                # 1. 선택된 ROI의 핸들 클릭 → 리사이즈
+                if self._calib_selected_idx is not None:
+                    sel = self._calib_burners[self._calib_selected_idx]
+                    if sel.get("source_id") == src_id:
+                        handle = self._calib_resize_hit(sel["roi"], vx, vy)
+                        if handle:
+                            self._calib_op = 'resize'
+                            self._calib_resize_dir = handle
+                            self._calib_op_origin = list(sel["roi"])
+                            self._calib_op_start = (vx, vy)
+                            self._calib_active_source = src_id
+                            return
+
+                # 2. 기존 ROI 내부 클릭 → 선택 + 이동
                 hit_idx = None
                 for idx in range(len(self._calib_burners) - 1, -1, -1):
                     b = self._calib_burners[idx]
@@ -595,21 +617,22 @@ class UIDisplay:
                     if rx <= vx <= rx + rw and ry <= vy <= ry + rh:
                         hit_idx = idx
                         break
+
                 if hit_idx is not None:
-                    # 선택만 (드래그 시작 X)
                     self._calib_selected_idx = hit_idx
-                    self._calib_dragging = False
-                    self._calib_drag_start = None
-                    self._calib_drag_end = None
+                    self._calib_op = 'move'
+                    self._calib_op_origin = list(self._calib_burners[hit_idx]["roi"])
+                    self._calib_op_start = (vx, vy)
+                    self._calib_active_source = src_id
                 else:
-                    # 새 ROI 드래그 시작
+                    # 3. 빈 영역 드래그 → 새 ROI 그리기
                     self._calib_selected_idx = None
+                    self._calib_op = 'new'
                     self._calib_active_source = src_id
                     self._calib_dragging = True
                     self._calib_drag_start = (vx, vy)
                     self._calib_drag_end = (vx, vy)
             else:
-                # 영상 영역 바깥 클릭 → 선택 해제
                 self._calib_selected_idx = None
             return
 
@@ -685,11 +708,19 @@ class UIDisplay:
         if self.layout_mode and self._layout_drag_kind is not None:
             self._layout_drag_pos = pos
             return
-        if self.calibration_mode and self._calib_dragging:
+        if self.calibration_mode and self._calib_op is not None:
             v_pos = self._to_video_pos(pos)
             if v_pos and v_pos[0] == self._calib_active_source:
-                # 드래그가 다른 카메라 셀로 넘어가는 건 무시 (시작 셀 안에서만)
-                self._calib_drag_end = (v_pos[1], v_pos[2])
+                src_id, vx, vy = v_pos
+                if self._calib_op == 'new':
+                    self._calib_drag_end = (vx, vy)
+                elif self._calib_op == 'move' and self._calib_selected_idx is not None:
+                    ox, oy, ow, oh = self._calib_op_origin
+                    dx = vx - self._calib_op_start[0]
+                    dy = vy - self._calib_op_start[1]
+                    self._calib_burners[self._calib_selected_idx]["roi"] = [ox + dx, oy + dy, ow, oh]
+                elif self._calib_op == 'resize' and self._calib_selected_idx is not None:
+                    self._apply_calib_resize(vx, vy)
 
     def _on_mouse_up(self, pos: tuple[int, int]) -> None:
         if self.layout_mode and self._layout_drag_kind is not None:
@@ -721,25 +752,30 @@ class UIDisplay:
             self._layout_drag_id = None
             return
 
-        if self.calibration_mode and self._calib_dragging:
-            self._calib_dragging = False
-            if self._calib_drag_start and self._calib_drag_end and self._calib_active_source is not None:
-                x1, y1 = self._calib_drag_start
-                x2, y2 = self._calib_drag_end
-                roi = [min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)]
-                if roi[2] > 20 and roi[3] > 20:
-                    next_id = len(self._calib_burners) + 1
-                    self._calib_burners.append({
-                        "id": next_id,
-                        "source_id": self._calib_active_source,
-                        "countdown_first": 720,
-                        "countdown_second": 270,
-                        "done_first_timeout": 120,
-                        "pot_absent_threshold": 30,
-                        "roi": roi
-                    })
-            self._calib_drag_start = None
-            self._calib_drag_end = None
+        if self.calibration_mode and self._calib_op is not None:
+            if self._calib_op == 'new' and self._calib_dragging:
+                self._calib_dragging = False
+                if self._calib_drag_start and self._calib_drag_end and self._calib_active_source is not None:
+                    x1, y1 = self._calib_drag_start
+                    x2, y2 = self._calib_drag_end
+                    roi = [min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)]
+                    if roi[2] > 20 and roi[3] > 20:
+                        next_id = len(self._calib_burners) + 1
+                        self._calib_burners.append({
+                            "id": next_id,
+                            "source_id": self._calib_active_source,
+                            "countdown_first": 720,
+                            "countdown_second": 270,
+                            "done_first_timeout": 120,
+                            "pot_absent_threshold": 30,
+                            "roi": roi
+                        })
+                self._calib_drag_start = None
+                self._calib_drag_end = None
+            self._calib_op = None
+            self._calib_resize_dir = None
+            self._calib_op_origin = None
+            self._calib_op_start = None
             self._calib_active_source = None
             return
 
@@ -1014,6 +1050,53 @@ class UIDisplay:
             pause_surf.blit(txt, txt.get_rect(center=(nw//2, nh//2)))
             self._screen.blit(pause_surf, (cx, cy))
 
+    def _calib_resize_hit(self, roi: list, vx: int, vy: int) -> str | None:
+        """선택된 ROI의 8개 핸들 중 (vx, vy)가 닿는 핸들 이름 반환. 없으면 None."""
+        x, y, w, h = roi
+        r = max(12, int(min(w, h) * 0.08))
+        handles = {
+            'nw': (x,       y      ), 'n':  (x+w//2, y      ), 'ne': (x+w,   y      ),
+            'e':  (x+w,     y+h//2 ),
+            'se': (x+w,     y+h    ), 's':  (x+w//2, y+h    ), 'sw': (x,     y+h    ),
+            'w':  (x,       y+h//2 ),
+        }
+        for name, (hx, hy) in handles.items():
+            if abs(vx - hx) <= r and abs(vy - hy) <= r:
+                return name
+        return None
+
+    def _apply_calib_resize(self, vx: int, vy: int) -> None:
+        """리사이즈 드래그 중 선택된 ROI를 방향에 맞게 실시간 갱신."""
+        if self._calib_selected_idx is None or self._calib_op_origin is None or self._calib_op_start is None:
+            return
+        ox, oy, ow, oh = self._calib_op_origin
+        dx = vx - self._calib_op_start[0]
+        dy = vy - self._calib_op_start[1]
+        d = self._calib_resize_dir or ''
+        MIN = 30
+
+        if 'w' in d:
+            new_x = ox + dx
+            new_w = ow - dx
+            if new_w < MIN:
+                new_x = ox + ow - MIN
+                new_w = MIN
+        else:
+            new_x = ox
+            new_w = max(MIN, ow + (dx if 'e' in d else 0))
+
+        if 'n' in d:
+            new_y = oy + dy
+            new_h = oh - dy
+            if new_h < MIN:
+                new_y = oy + oh - MIN
+                new_h = MIN
+        else:
+            new_y = oy
+            new_h = max(MIN, oh + (dy if 's' in d else 0))
+
+        self._calib_burners[self._calib_selected_idx]["roi"] = [new_x, new_y, new_w, new_h]
+
     def _draw_calibration_overlay(self, box_w, box_h, canvas_y0: int = 0):
         """캘리브레이션 모드 — 확정된 화구를 각 source_id 셀에 매핑해서 표시."""
         # 1. 확정된 화구들 (셀별 좌표 변환)
@@ -1036,6 +1119,14 @@ class UIDisplay:
             pygame.draw.rect(self._screen, border_color, (sx, sy, 26, 22))
             txt = self._fonts["id"].render(str(b["id"]), True, _C_TEXT_DARK)
             self._screen.blit(txt, (sx + 4, sy + 1))
+
+            if is_selected:
+                hs = 10  # 핸들 크기 (px)
+                for fx, fy in [(0,0),(0.5,0),(1,0),(1,0.5),(1,1),(0.5,1),(0,1),(0,0.5)]:
+                    hx_s = int(sx + fx * sw)
+                    hy_s = int(sy + fy * sh)
+                    pygame.draw.rect(self._screen, (20, 20, 20),    (hx_s-hs//2,   hy_s-hs//2,   hs,   hs))
+                    pygame.draw.rect(self._screen, (255,255,255),   (hx_s-hs//2+1, hy_s-hs//2+1, hs-2, hs-2))
 
         # 2. 드래그 중인 임시 사각형 (활성 셀 위에)
         if self._calib_dragging and self._calib_drag_start and self._calib_drag_end and self._calib_active_source is not None:
@@ -1065,7 +1156,7 @@ class UIDisplay:
         sel_hint = f" | 선택:#{self._calib_burners[self._calib_selected_idx]['id']} (DEL=삭제, [ ]=순서변경)" \
                    if self._calib_selected_idx is not None and self._calib_selected_idx < len(self._calib_burners) else ""
         desc = self._fonts["small"].render(
-            f"드래그=새화구  클릭=선택  DEL=삭제  [ ]=ID앞뒤  Z=이전취소  ENTER=저장  ESC=취소  ({summary}){sel_hint}",
+            f"빈곳드래그=새화구  ROI드래그=이동  ↔핸들=크기조절  DEL=삭제  [ ]=ID앞뒤  Z=이전취소  ENTER=저장  ESC=취소  ({summary}){sel_hint}",
             True, _C_TEXT_LIGHT
         )
         self._screen.blit(title, (20, canvas_y0 + 8))

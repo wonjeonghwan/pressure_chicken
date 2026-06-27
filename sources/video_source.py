@@ -9,6 +9,9 @@
         ret, frame = src.read()
 """
 
+import sys
+import time
+import threading
 import cv2
 import numpy as np
 
@@ -17,7 +20,8 @@ class VideoSource:
     """카메라 또는 파일을 동일한 인터페이스로 제공"""
 
     _RECONNECT_THRESHOLD = 10   # 연속 실패 N회 시 재연결 시도
-    _RECONNECT_COOLDOWN  = 3.0  # 재연결 시도 최소 간격 (초)
+    _RECONNECT_COOLDOWN  = 5.0  # 재연결 시도 최소 간격 (초) — MSMF 해제 안정화 여유
+    _STALE_THRESHOLD     = 5.0  # 마지막 프레임으로부터 이 시간(초) 초과 시 stale 처리
 
     def __init__(self, source_cfg: dict):
         self._cfg = source_cfg
@@ -25,6 +29,13 @@ class VideoSource:
         self.failed = False  # 열기 실패 여부
         self._fail_count   = 0
         self._last_reconnect = 0.0
+
+        # 캡처 스레드 (카메라 소스 전용)
+        self._capture_thread: threading.Thread | None = None
+        self._stop_event: threading.Event = threading.Event()
+        self._frame_lock: threading.Lock = threading.Lock()
+        self._latest_frame: np.ndarray | None = None
+        self._latest_ts: float = 0.0
 
     def open(self) -> None:
         src_type = self._cfg.get("type", "camera")
@@ -37,10 +48,14 @@ class VideoSource:
                 fallback = self._cfg.get("fallback_index", 0)
                 self._cap = cv2.VideoCapture(fallback)
         else:
-            import sys
             index = self._cfg.get("index", 0)
             if sys.platform == "win32":
-                self._cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+                # CAP_PROP_HW_ACCELERATION=NONE: MSMF D3D11 HW 컬러 변환 파이프라인 비활성화
+                # — Nvidia 환경에서 일부 USB 카메라 드라이버와 조합 시 YUV→BGR 밝기 과도 상승(블리칭) 버그 방지
+                self._cap = cv2.VideoCapture(
+                    index, cv2.CAP_MSMF,
+                    [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
+                )
             else:
                 self._cap = cv2.VideoCapture(index)
 
@@ -72,8 +87,13 @@ class VideoSource:
         print(f"[VideoSource] 재연결 시도: index={index}")
         if self._cap is not None:
             self._cap.release()
+            self._cap = None
+            time.sleep(0.5)  # MSMF가 장치 핸들을 완전히 해제할 시간
         if sys.platform == "win32":
-            cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+            cap = cv2.VideoCapture(
+                index, cv2.CAP_MSMF,
+                [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
+            )
         else:
             cap = cv2.VideoCapture(index)
         if cap.isOpened():
@@ -89,6 +109,12 @@ class VideoSource:
     def read(self) -> tuple[bool, np.ndarray | None]:
         """프레임 한 장 읽기. 파일 끝이면 처음부터 루프."""
         if self._cap is None:
+            # _cap=None 상태(_try_reconnect 실패 후)에도 재시도 카운터를 계속 증가시켜
+            # 쿨다운이 지나면 다시 재연결을 시도한다.
+            if self._cfg.get("type", "camera") == "camera":
+                self._fail_count += 1
+                if self._fail_count >= self._RECONNECT_THRESHOLD:
+                    self._try_reconnect()
             return False, None
 
         ret, frame = self._cap.read()
@@ -144,7 +170,74 @@ class VideoSource:
             )
         return cv2.LUT(frame, cls._lut_cache[gamma])
 
+    # ── 캡처 스레드 (카메라 소스 전용) ────────────────────────────────────────
+
+    def start_capture(self, fps: float | None = None) -> None:
+        """백그라운드 캡처 스레드 시작. 이미 실행 중이면 무시.
+
+        fps: 캡처 속도 상한 (None이면 카메라 최대속도).
+             처리 파이프라인 주기(target_fps)와 맞추면 불필요한 프레임 생성을 줄인다.
+        """
+        if self._cfg.get("type", "camera") != "camera":
+            return
+        if self._capture_thread is not None and self._capture_thread.is_alive():
+            return
+        self._capture_fps = fps
+        self._stop_event.clear()
+        idx = self._cfg.get("index", 0)
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop,
+            name=f"cam-{idx}",
+            daemon=True,
+        )
+        self._capture_thread.start()
+
+    def stop_capture(self) -> None:
+        """캡처 스레드 정지 (release() 전에 호출)."""
+        self._stop_event.set()
+        if self._capture_thread is not None:
+            self._capture_thread.join(timeout=3.0)
+            self._capture_thread = None
+
+    def _capture_loop(self) -> None:
+        """백그라운드 캡처 루프 — 최신 프레임을 슬롯에 유지."""
+        interval = (1.0 / self._capture_fps) if self._capture_fps else None
+        while not self._stop_event.is_set():
+            t0 = time.monotonic()
+            ret, frame = self.read()
+            if ret and frame is not None:
+                with self._frame_lock:
+                    self._latest_frame = frame
+                    self._latest_ts = time.monotonic()
+                if interval:
+                    # 처리 주기만큼 대기 — stop 신호도 즉시 수신
+                    wait = interval - (time.monotonic() - t0)
+                    if wait > 0:
+                        self._stop_event.wait(wait)
+            else:
+                # 실패 시 짧게 대기 — _cap=None 상태에서 CPU 스핀 방지
+                self._stop_event.wait(0.033)
+
+    def get_latest(self) -> tuple[bool, np.ndarray | None]:
+        """메인루프용 비블로킹 최신 프레임 조회.
+
+        캡처 스레드가 없으면(파일 소스 등) 기존 read()로 폴백.
+        """
+        if self._capture_thread is None:
+            return self.read()
+        with self._frame_lock:
+            frame = self._latest_frame
+            ts    = self._latest_ts
+        if frame is None:
+            return False, None
+        if time.monotonic() - ts > self._STALE_THRESHOLD:
+            return False, None
+        return True, frame
+
+    # ── 자원 해제 ──────────────────────────────────────────────────────────────
+
     def release(self) -> None:
+        self.stop_capture()  # 스레드 먼저 정지 후 cap 해제
         if self._cap is not None:
             self._cap.release()
             self._cap = None
@@ -171,7 +264,10 @@ class VideoSource:
         available = []
         for i in range(max_try):
             if sys.platform == "win32":
-                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+                cap = cv2.VideoCapture(
+                    i, cv2.CAP_MSMF,
+                    [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
+                )
             else:
                 cap = cv2.VideoCapture(i)
             if cap is not None and cap.isOpened():

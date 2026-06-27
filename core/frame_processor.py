@@ -157,9 +157,14 @@ class FrameProcessor:
         return out
 
     def read_frames(self) -> dict[int, np.ndarray]:
+        """각 소스에서 최신 프레임 수집.
+
+        카메라 소스: get_latest() — 캡처 스레드 버퍼에서 비블로킹 조회.
+        파일 소스:   read()      — 기존 동기 방식 유지 (frame skip 타이밍 보존).
+        """
         frames: dict[int, np.ndarray | None] = {}
         for src_id, src in self._sources.items():
-            ret, frame = src.read()
+            ret, frame = src.get_latest()
             frames[src_id] = frame if ret else None
         self._frame_cache = frames
         return {sid: f for sid, f in frames.items() if f is not None}

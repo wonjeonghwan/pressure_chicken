@@ -5,9 +5,9 @@ opencv-python>=4.8.0; sys_platform != "darwin"
 pygame>=2.5.0
 numpy>=1.24.0
 
-# PyTorch CUDA 12.x (RTX 3060 Ti 기준, 드라이버 577+)
+# PyTorch CUDA 12.8 (RTX 50xx Blackwell sm_120 지원, 드라이버 570+)
 # uv 사용 시: pyproject.toml의 [tool.uv.sources] 설정으로 자동 적용 (uv sync)
 # pip 사용 시: 아래 명령으로 별도 설치 필요
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 torch>=2.0.0
 torchvision>=0.15.0

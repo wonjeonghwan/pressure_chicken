@@ -70,8 +70,18 @@ class BurnerDetector:
             cls._model        = YOLO(weights_path)
             cls._confidence   = confidence
             cls._model_missing = False
-            # FP16(half)은 CUDA에서만 안정적 — MPS/CPU는 False
-            cls._use_half = torch.cuda.is_available()
+
+            # FP16(half)은 CUDA에서만 — GPU 아키텍처 호환성 확인 후 설정
+            if torch.cuda.is_available():
+                try:
+                    torch.zeros(1, device="cuda")  # 간단한 커널 실행으로 호환성 검증
+                    cls._use_half = True
+                except Exception as cuda_err:
+                    print(f"[Detector] CUDA 호환 오류 ({cuda_err}) → CPU/FP32 모드로 폴백")
+                    cls._use_half = False
+            else:
+                cls._use_half = False
+
             print(f"[Detector] YOLO 모델 로드 완료: {weights_path}  (half={cls._use_half})")
         except Exception as e:
             print(f"[Detector] 로드 실패 ({e}) → 빈 리스트 반환 모드")

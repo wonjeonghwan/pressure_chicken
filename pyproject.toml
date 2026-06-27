@@ -12,18 +12,20 @@ dependencies = [
     "numpy>=1.24.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
+    "comtypes>=1.4.16",
 ]
 
-# Linux(CUDA 12.4), Mac(기본 PyTorch/MPS) 플랫폼 분기
+# Windows/Linux: CUDA 12.8 (RTX 50xx Blackwell sm_120 지원)
+# Mac: 기본 PyTorch(MPS)
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 torchvision = [
-    { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
