@@ -39,3 +39,6 @@ dataset/*_aug/
 # 디버깅용 덤프 이미지/폴더
 debug_*/
 frame_*.jpg
+
+# 런타임 로그 (감지 로그 jsonl, FrameSaver 스냅샷 등 — 매장별 대용량 데이터)
+logs/

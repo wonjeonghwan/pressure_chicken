@@ -9,7 +9,7 @@
       "label": "Cam-10",
       "layout_pos": [
         4,
-        5
+        0
       ],
       "layout_size": [
         5,
@@ -39,7 +39,7 @@
       "device_location": "0003.0000.0000.007.001.000.000.000.000",
       "layout_pos": [
         4,
-        0
+        5
       ],
       "layout_size": [
         5,
@@ -89,16 +89,16 @@
     "farneback_iterations": 3,
     "farneback_poly_n": 5,
     "farneback_poly_sigma": 1.2,
-    "rms_threshold": 0.15,
+    "rms_threshold": 0.18,
     "rms_ema_alpha": 0.5,
     "pos_ema_alpha": 0.3,
     "max_box_jump_ratio": 0.5,
-    "window_frames": 10,
-    "trigger_frames": 8,
+    "window_frames": 15,
+    "trigger_frames": 10,
     "reset_on_missing_box": false,
     "normalize_rms": true,
-    "normalize_ref_diag": 40.0,
-    "normalize_gamma": -0.1
+    "normalize_ref_diag": 30.0,
+    "normalize_gamma": -2
   },
   "frequency": {
     "enabled": false,
@@ -116,16 +116,16 @@
   "burners": [
     {
       "id": 1,
-      "source_id": 13,
+      "source_id": 10,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        135,
-        199,
-        139,
-        171
+        136,
+        189,
+        149,
+        167
       ],
       "grid_pos": [
         2,
@@ -134,34 +134,37 @@
     },
     {
       "id": 2,
-      "source_id": 13,
+      "source_id": 10,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        256,
-        34,
-        129,
-        137
+        245,
+        45,
+        141,
+        119
       ],
       "grid_pos": [
         0,
         1
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.15
+      }
     },
     {
       "id": 3,
-      "source_id": 13,
+      "source_id": 10,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        364,
-        189,
-        104,
-        115
+        371,
+        197,
+        98,
+        118
       ],
       "grid_pos": [
         2,
@@ -170,106 +173,121 @@
     },
     {
       "id": 4,
-      "source_id": 13,
+      "source_id": 10,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        435,
-        52,
-        75,
-        129
+        421,
+        55,
+        94,
+        121
       ],
       "grid_pos": [
         0,
         3
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.16
+      }
     },
     {
       "id": 5,
+      "source_id": 10,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 120,
+      "pot_absent_threshold": 30,
+      "roi": [
+        490,
+        187,
+        67,
+        94
+      ],
+      "grid_pos": [
+        2,
+        4
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.13
+      }
+    },
+    {
+      "id": 6,
       "source_id": 13,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        499,
-        192,
-        65,
-        96
-      ],
-      "grid_pos": [
-        2,
-        4
-      ]
-    },
-    {
-      "id": 6,
-      "source_id": 10,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        324,
-        78,
-        75,
-        69
+        328,
+        73,
+        71,
+        81
       ],
       "grid_pos": [
         0,
         5
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.12
+      }
     },
     {
       "id": 7,
-      "source_id": 10,
+      "source_id": 13,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        236,
-        122,
-        71,
-        77
+        229,
+        108,
+        76,
+        104
       ],
       "grid_pos": [
         2,
         6
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.14
+      }
     },
     {
       "id": 8,
-      "source_id": 10,
+      "source_id": 13,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        351,
-        168,
-        71,
-        100
+        346,
+        161,
+        75,
+        132
       ],
       "grid_pos": [
         0,
         7
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.13
+      }
     },
     {
       "id": 9,
-      "source_id": 10,
+      "source_id": 13,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        216,
-        228,
-        95,
-        138
+        219,
+        227,
+        111,
+        149
       ],
       "grid_pos": [
         2,
@@ -278,21 +296,24 @@
     },
     {
       "id": 10,
-      "source_id": 10,
+      "source_id": 13,
       "countdown_first": 720,
       "countdown_second": 270,
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        376,
-        320,
-        96,
-        123
+        353,
+        310,
+        129,
+        137
       ],
       "grid_pos": [
         0,
         9
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.15
+      }
     },
     {
       "id": 11,
@@ -302,10 +323,10 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        228,
-        216,
-        134,
-        156
+        229,
+        222,
+        127,
+        125
       ],
       "grid_pos": [
         3,
@@ -321,9 +342,9 @@
       "pot_absent_threshold": 30,
       "roi": [
         387,
-        182,
-        111,
-        94
+        171,
+        119,
+        108
       ],
       "grid_pos": [
         4,
@@ -338,10 +359,10 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        299,
-        96,
-        122,
-        94
+        296,
+        92,
+        118,
+        98
       ],
       "grid_pos": [
         5,
@@ -357,9 +378,9 @@
       "pot_absent_threshold": 30,
       "roi": [
         426,
-        77,
-        103,
-        92
+        69,
+        106,
+        82
       ],
       "grid_pos": [
         6,
@@ -374,15 +395,19 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        361,
-        22,
-        94,
-        59
+        353,
+        13,
+        99,
+        68
       ],
       "grid_pos": [
         7,
         12
-      ]
+      ],
+      "rms_override_enabled": true,
+      "optical_flow": {
+        "rms_threshold": 0.14
+      }
     },
     {
       "id": 16,
@@ -392,15 +417,19 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        165,
-        58,
-        106,
-        63
+        175,
+        44,
+        88,
+        77
       ],
       "grid_pos": [
         8,
         10
-      ]
+      ],
+      "rms_override_enabled": true,
+      "optical_flow": {
+        "rms_threshold": 0.15
+      }
     },
     {
       "id": 17,
@@ -410,10 +439,10 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        229,
-        120,
-        122,
-        117
+        239,
+        112,
+        101,
+        96
       ],
       "grid_pos": [
         9,
@@ -428,9 +457,9 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        94,
-        141,
-        125,
+        100,
+        133,
+        121,
         96
       ],
       "grid_pos": [
@@ -446,10 +475,10 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        167,
-        244,
-        151,
-        136
+        161,
+        232,
+        144,
+        111
       ],
       "grid_pos": [
         11,
@@ -464,10 +493,10 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        1,
-        268,
-        138,
-        138
+        14,
+        255,
+        130,
+        133
       ],
       "grid_pos": [
         12,

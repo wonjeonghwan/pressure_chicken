@@ -52,12 +52,22 @@ class OpticalFlowDetector:
         self.last_rms:            float = 0.0
         self.last_normalized_rms: float = 0.0
         self.last_smoothed_rms:   float = 0.0
+        self.last_mask_px:        int   = 0
         self.last_flow:           np.ndarray | None = None
         self.last_masked_flow_x:  float | None = None  # Phase 3용
         self.last_roi_box:        tuple[int, int, int, int] | None = None
         self.last_skipped:        bool = False
         self.last_jump_px:        float = 0.0
         self.last_reset_reason:   str | None = None
+
+    @property
+    def rms_threshold(self) -> float:
+        return self._rms_thr
+
+    @rms_threshold.setter
+    def rms_threshold(self, value: float) -> None:
+        """dev 모드 UI에서 실행 중 실시간으로 임계값을 조정할 때 사용."""
+        self._rms_thr = value
 
     def reset(self) -> None:
         self._prev_roi_gray      = None
@@ -70,6 +80,7 @@ class OpticalFlowDetector:
         self.last_rms            = 0.0
         self.last_normalized_rms = 0.0
         self.last_smoothed_rms   = 0.0
+        self.last_mask_px        = 0
         self.last_flow           = None
         self.last_masked_flow_x  = None
         self.last_roi_box        = None
@@ -154,7 +165,8 @@ class OpticalFlowDetector:
         # ── 4. RMS 계산: 평균 flow 차감 후 residual RMS (deformation 측정) ──
         # mask 있으면: mask 내부 픽셀의 mean flow 차감 → 카메라 떨림/위치 이동 제거
         # mask 없으면: bbox 전체 픽셀의 mean flow 차감 → 부분적으로 떨림 상쇄
-        masked_rms = self._compute_masked_rms(flow, rx1, ry1, mask_xy)
+        masked_rms, mask_px = self._compute_masked_rms(flow, rx1, ry1, mask_xy)
+        self.last_mask_px = mask_px
         if masked_rms is None:
             fx = flow[..., 0].ravel()
             fy = flow[..., 1].ravel()
@@ -260,27 +272,27 @@ class OpticalFlowDetector:
         roi_x1: int,
         roi_y1: int,
         mask_xy: np.ndarray | None,
-    ) -> float | None:
+    ) -> tuple[float | None, int]:
         """mask 내부 픽셀의 평균 flow를 차감한 뒤 residual RMS 반환 (deformation RMS).
 
         평균 flow = 카메라 떨림 + 딸랑이 위치 이동의 합산값.
         차감 후 residual = 순수 형상 변화(진동)만 남음.
-        mask 없거나 유효 픽셀 10개 미만이면 None 반환 → 호출자가 fallback 처리.
+        반환: (rms | None, mask_pixel_count) — mask 없거나 픽셀 10개 미만이면 (None, count)
         """
         if mask_xy is None or len(mask_xy) < 3:
-            return None
+            return None, 0
         rh, rw = flow.shape[:2]
         local_pts = (mask_xy - np.array([[roi_x1, roi_y1]], dtype=np.float32)).astype(np.int32)
         mask_img = np.zeros((rh, rw), dtype=np.uint8)
         cv2.fillPoly(mask_img, [local_pts], 255)
         pixel_count = int(np.count_nonzero(mask_img))
         if pixel_count < 10:
-            return None
+            return None, pixel_count
         fx = flow[..., 0][mask_img > 0]
         fy = flow[..., 1][mask_img > 0]
         rx = fx - np.mean(fx)
         ry = fy - np.mean(fy)
-        return float(np.sqrt(np.mean(rx ** 2 + ry ** 2)))
+        return float(np.sqrt(np.mean(rx ** 2 + ry ** 2))), pixel_count
 
     @staticmethod
     def _compute_masked_flow_x(

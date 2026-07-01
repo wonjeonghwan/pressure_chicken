@@ -49,6 +49,7 @@ class UIDisplay:
         config_data: dict,
         config_path: str,
         model_missing: bool = True,
+        logger=None,
     ):
         self._cfg          = ui_cfg
         self._registry     = registry
@@ -56,6 +57,7 @@ class UIDisplay:
         self.config_data   = config_data
         self.config_path   = config_path
         self._model_missing = model_missing
+        self._logger       = logger
 
         self._screen: pygame.Surface | None = None
         self._clock:  pygame.time.Clock | None = None
@@ -68,7 +70,13 @@ class UIDisplay:
         self._card_rects:  dict[int, pygame.Rect] = {}
         self._reset_rects: dict[int, pygame.Rect] = {}
         self._start_rects: dict[int, pygame.Rect] = {}
-        
+
+        # 개발자 모드 — 화구별 단독 rms_threshold 체크박스/조정 삼각형 (dev_mode에서만 채워짐)
+        self._rms_toggle_rects: dict[int, pygame.Rect] = {}
+        self._rms_up_rects:     dict[int, pygame.Rect] = {}
+        self._rms_down_rects:   dict[int, pygame.Rect] = {}
+        self._last_processor = None  # render()에서 매 프레임 갱신 — 이벤트 핸들러에서 참조용
+
         # UI 상태
         self.show_mask = True
         self.video_paused = False
@@ -421,6 +429,11 @@ class UIDisplay:
         self._toast_msg = msg
         self._toast_until = time.monotonic() + duration_s
 
+    def _persist_config_data(self) -> None:
+        """현재 메모리상의 config_data를 그대로 디스크에 반영 (개발자 모드의 화구별 rms_threshold 설정 등 즉시 저장)."""
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(self.config_data, f, ensure_ascii=False, indent=2)
+
     def save_calibration(self):
         self.calibration_mode = False
         # 저장 직전 자동 그룹화 — source_id 오름차순, 같은 카메라 내 list 순서 유지, ID 1부터
@@ -545,8 +558,12 @@ class UIDisplay:
         if self._selected_id is not None:
             bsm = self._registry.get(self._selected_id)
             if key == pygame.K_r:
+                if self._logger:
+                    self._logger.log_manual_action(self._selected_id, "reset", bsm.state.name)
                 bsm.manual_reset()
             elif key == pygame.K_s:
+                if self._logger:
+                    self._logger.log_manual_action(self._selected_id, "start", bsm.state.name)
                 bsm.manual_start()
 
         return False
@@ -666,11 +683,36 @@ class UIDisplay:
                     self._show_toast(f"Cam-{target_sid} 제거 실패")
             return
 
+        # 개발자 모드 - 화구 단독 rms_threshold 사용 토글
+        for bid, rect in self._rms_toggle_rects.items():
+            if rect.collidepoint(pos):
+                if self._last_processor is not None:
+                    enabled = self._last_processor.get_rms_override_enabled(bid)
+                    self._last_processor.set_rms_override_enabled(bid, not enabled)
+                    self._persist_config_data()
+                return
+
+        # 개발자 모드 - 화구 단독 rms_threshold 0.01 단위 조정
+        for bid, rect in self._rms_up_rects.items():
+            if rect.collidepoint(pos):
+                if self._last_processor is not None:
+                    self._last_processor.adjust_own_rms_threshold(bid, 0.01)
+                    self._persist_config_data()
+                return
+        for bid, rect in self._rms_down_rects.items():
+            if rect.collidepoint(pos):
+                if self._last_processor is not None:
+                    self._last_processor.adjust_own_rms_threshold(bid, -0.01)
+                    self._persist_config_data()
+                return
+
         # 일반 모드 - 화구 리셋
         for bid, rect in self._reset_rects.items():
             if rect.collidepoint(pos):
                 bsm = self._registry.get(bid)
                 if bsm.state == BurnerState.DONE_SECOND:
+                    if self._logger:
+                        self._logger.log_manual_action(bid, "reset", bsm.state.name)
                     bsm.manual_reset()
                 else:
                     self._reset_hold[bid] = time.monotonic()
@@ -679,7 +721,10 @@ class UIDisplay:
         # 일반 모드 - 화구 수동 시작
         for bid, rect in self._start_rects.items():
             if rect.collidepoint(pos):
-                self._registry.get(bid).manual_start()
+                bsm = self._registry.get(bid)
+                if self._logger:
+                    self._logger.log_manual_action(bid, "start", bsm.state.name)
+                bsm.manual_start()
                 return
 
         # 카드 선택
@@ -786,13 +831,17 @@ class UIDisplay:
         if self._screen is None:
             return
 
+        self._last_processor = processor
         self._flush_announcements()
 
         # 길게 누르기 버튼 처리
         now = time.monotonic()
         for bid, start_t in list(self._reset_hold.items()):
             if now - start_t >= _RESET_HOLD_S:
-                self._registry.get(bid).manual_reset()
+                bsm = self._registry.get(bid)
+                if self._logger:
+                    self._logger.log_manual_action(bid, "reset", bsm.state.name)
+                bsm.manual_reset()
                 del self._reset_hold[bid]
 
         sw, sh = self._screen.get_size()
@@ -917,6 +966,9 @@ class UIDisplay:
         self._card_rects.clear()
         self._start_rects.clear()
         self._reset_rects.clear()
+        self._rms_toggle_rects.clear()
+        self._rms_up_rects.clear()
+        self._rms_down_rects.clear()
 
         gx, gy = self._canvas_origin
         w = 2 * self._half_cell_w
@@ -1177,7 +1229,7 @@ class UIDisplay:
             self._screen.blit(msg, (20, oy + 7))
             oy += 38
 
-        toolbar_h = 40
+        toolbar_h = 40 + (22 if self.dev_mode else 0)
         toolbar_rect = pygame.Rect(10, oy, sw - 20, toolbar_h)
         pygame.draw.rect(self._screen, _C_CARD_BG, toolbar_rect, border_radius=6)
         by = oy + 12
@@ -1221,6 +1273,12 @@ class UIDisplay:
         add_surf = self._fonts["btn"].render("+추가", True, _C_TEXT_LIGHT)
         self._screen.blit(rem_surf, rem_surf.get_rect(center=self._cam_remove_rect.center))
         self._screen.blit(add_surf, add_surf.get_rect(center=self._cam_add_rect.center))
+
+        # 개발자 모드 — 전체(global) rms_threshold 표시 (화구 카드에는 화구별 단독값만 표시)
+        if self.dev_mode and self._last_processor is not None:
+            g_thr = self._last_processor.get_global_rms_threshold()
+            g_surf = self._fonts["small"].render(f"🛠 전체 RMS threshold: {g_thr:.2f}", True, _C_BRAND)
+            self._screen.blit(g_surf, (20, by + 22))
 
         oy += toolbar_h + 8
         return oy
@@ -1440,10 +1498,25 @@ class UIDisplay:
         pygame.draw.rect(self._screen, (100, 100, 110, 100), badge_rect, 1, border_radius=3)
         self._screen.blit(cam_surf, (badge_rect.x + bp, badge_rect.y + 1))
 
+        # --- 2b. 개발자 모드: 화구 단독 rms_threshold 사용 여부 토글 (카메라 뱃지 왼쪽 원) ---
+        if self.dev_mode and not self.layout_mode and self._last_processor is not None:
+            own_enabled = self._last_processor.get_rms_override_enabled(bid)
+            r = 7
+            tcx = badge_rect.x - r - 6
+            tcy = badge_rect.y + badge_rect.height // 2
+            if own_enabled:
+                pygame.draw.circle(self._screen, _C_BRAND, (tcx, tcy), r)
+            else:
+                pygame.draw.circle(self._screen, (70, 70, 75), (tcx, tcy), r)
+                pygame.draw.circle(self._screen, (140, 140, 150), (tcx, tcy), r, 1)
+            self._rms_toggle_rects[bid] = pygame.Rect(tcx - r - 3, tcy - r - 3, (r + 3) * 2, (r + 3) * 2)
+        else:
+            self._rms_toggle_rects.pop(bid, None)
+
         # --- 1. 화구 번호 — 카드에서 가장 크고 눈에 잘 보이는 핵심 요소.
         # 상태/타이머/게이지/버튼이 들어갈 하단 footer를 제외한 나머지 영역을
         # 전부 채우는 크기로 렌더링하고, 가로 중앙에 배치한다.
-        footer_h = 54  # 상태줄 + 게이지 + 버튼 영역에 필요한 고정 높이
+        footer_h = 62  # 상태줄(24px) + 게이지 + 버튼 영역에 필요한 고정 높이 — 상태 텍스트가 게이지바에 가려지지 않도록 여유 확보
         if self.dev_mode:
             # 개발 모드: 정보가 많아 번호는 콤팩트한 배지로 축소
             rad = 8
@@ -1489,6 +1562,28 @@ class UIDisplay:
             rms_surf = self._fonts["small"].render(rms_text, True, tc)
             self._screen.blit(rms_surf, (x + 8, body_y + 16))
 
+            # --- 4b. 화구 단독 rms_threshold 표시 + 위/아래 삼각형(0.01 단위 조정) ---
+            if not self.layout_mode and self._last_processor is not None:
+                own_thr = self._last_processor.get_own_rms_threshold(bid)
+                thr_surf = self._fonts["small"].render(f"Thr: {own_thr:.2f}", True, tc)
+                thr_y = body_y + 34
+                self._screen.blit(thr_surf, (x + 8, thr_y))
+
+                tri_x = x + 8 + thr_surf.get_width() + 8
+                tri_w, tri_h = 14, 8
+                up_rect   = pygame.Rect(tri_x, thr_y - 1, tri_w, tri_h)
+                down_rect = pygame.Rect(tri_x, thr_y + tri_h + 2, tri_w, tri_h)
+                self._draw_triangle(up_rect, tc, "up")
+                self._draw_triangle(down_rect, tc, "down")
+                self._rms_up_rects[bid]   = up_rect
+                self._rms_down_rects[bid] = down_rect
+            else:
+                self._rms_up_rects.pop(bid, None)
+                self._rms_down_rects.pop(bid, None)
+        else:
+            self._rms_up_rects.pop(bid, None)
+            self._rms_down_rects.pop(bid, None)
+
         # --- 5. 진동 게이지 (슬림하고 예쁜 라운드 게이지바) ---
         gauge_x, gauge_y = x + 8, y + h - 34
         gauge_w, gauge_h = w - 18, 4
@@ -1526,6 +1621,14 @@ class UIDisplay:
 
         self._draw_btn(btn_r, "R", (70, 70, 75), hold_prog)
         self._draw_btn(btn_s, f"{start_label}(S)" if selected else start_label, btn_s_color)
+
+    def _draw_triangle(self, rect: pygame.Rect, color, direction: str) -> None:
+        """개발자 모드 rms_threshold 조정용 위/아래 삼각형 버튼."""
+        if direction == "up":
+            pts = [(rect.centerx, rect.top), (rect.left, rect.bottom), (rect.right, rect.bottom)]
+        else:
+            pts = [(rect.centerx, rect.bottom), (rect.left, rect.top), (rect.right, rect.top)]
+        pygame.draw.polygon(self._screen, color, pts)
 
     def _draw_btn(self, rect: pygame.Rect, text: str, color, hold=0.0):
         pygame.draw.rect(self._screen, color, rect, border_radius=4)

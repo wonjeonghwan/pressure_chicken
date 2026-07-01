@@ -76,8 +76,10 @@ class BurnerStateMachine:
         # FrameProcessor가 매 감지마다 갱신
         self.weight_detected: bool  = False
         self.vibration_score: float = 0.0
-        self.current_angle:   float | None = None
-        self.angle_deviation: float = 0.0
+        self.current_angle:   float | None = None  # smoothed RMS (UI 표시용)
+        self.angle_deviation: float = 0.0           # normalized RMS (EMA 전)
+        self.raw_rms:         float = 0.0           # 정규화·EMA 이전 원시 RMS
+        self.mask_px:         int   = 0             # 딸랑이 polygon 내부 유효 픽셀 수
 
     # ── 외부 이벤트 ────────────────────────────────────────────────────
 

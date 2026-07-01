@@ -63,6 +63,7 @@ class FrameProcessor:
 
         global_stab = config.get("stabilizer", {})
         global_flow = config.get("optical_flow", {})
+        self._global_flow = global_flow
 
         # Phase 1: 소스별 Stabilizer — source.stabilizer 가 있으면 global을 부분 덮어씀
         self._stabilizers: dict[int, Stabilizer] = {}
@@ -71,16 +72,16 @@ class FrameProcessor:
             self._stabilizers[sc["id"]] = Stabilizer(merged)
 
         # Phase 2: 화구별 OpticalFlowDetector
-        # 합성 우선순위: global < source.optical_flow < burner.optical_flow
+        # 합성 우선순위: global < source.optical_flow < burner.optical_flow (rms_override_enabled=False면 burner 단계 생략)
         # 카메라 모델/해상도 다르면 source별, 특정 화구만 다르면 burner별 override 가능
-        sources_by_id = {sc["id"]: sc for sc in config.get("sources", [])}
+        self._sources_by_id = {sc["id"]: sc for sc in config.get("sources", [])}
         self._oflow: dict[int, OpticalFlowDetector] = {}
         for b in burner_cfgs:
-            sc = sources_by_id.get(b.get("source_id"), {})
+            sc = self._sources_by_id.get(b.get("source_id"), {})
             merged = _merged_cfg(
                 global_flow,
                 sc.get("optical_flow", {}),
-                b.get("optical_flow", {}),
+                self._burner_flow_override(b),
             )
             self._oflow[b["id"]] = OpticalFlowDetector(merged)
 
@@ -109,6 +110,67 @@ class FrameProcessor:
 
     def oflow(self, bid: int) -> "OpticalFlowDetector | None":
         return self._oflow.get(bid)
+
+    # ── 화구별 rms_threshold 단독(override) 설정 — 개발자 모드 UI용 ──────────
+    def _burner_flow_override(self, b: dict) -> dict:
+        """burner.optical_flow 를 병합에 반영할지 여부. rms_override_enabled가 없으면
+        기존 방식(하위호환)대로 optical_flow.rms_threshold가 있으면 그냥 사용."""
+        enabled = b.get("rms_override_enabled")
+        if enabled is None:
+            enabled = "rms_threshold" in b.get("optical_flow", {})
+        return b.get("optical_flow", {}) if enabled else {}
+
+    def get_global_rms_threshold(self) -> float:
+        return self._global_flow.get("rms_threshold", 0.5)
+
+    def get_rms_override_enabled(self, bid: int) -> bool:
+        b = self._burner_map.get(bid)
+        if b is None:
+            return False
+        enabled = b.get("rms_override_enabled")
+        if enabled is None:
+            enabled = "rms_threshold" in b.get("optical_flow", {})
+        return bool(enabled)
+
+    def get_own_rms_threshold(self, bid: int) -> float:
+        """화구 단독 override 값 (사용 여부와 무관하게 저장된 수치). 없으면 현재 유효값을 기본으로."""
+        b = self._burner_map.get(bid)
+        if b is None:
+            return self.get_global_rms_threshold()
+        own = b.get("optical_flow", {}).get("rms_threshold")
+        if own is not None:
+            return own
+        oflow = self._oflow.get(bid)
+        return oflow.rms_threshold if oflow else self.get_global_rms_threshold()
+
+    def set_rms_override_enabled(self, bid: int, enabled: bool) -> None:
+        b = self._burner_map.get(bid)
+        if b is None:
+            return
+        b["rms_override_enabled"] = enabled
+        if enabled and "rms_threshold" not in b.get("optical_flow", {}):
+            b.setdefault("optical_flow", {})["rms_threshold"] = self.get_own_rms_threshold(bid)
+        self._apply_rms_threshold(bid)
+
+    def adjust_own_rms_threshold(self, bid: int, delta: float) -> None:
+        """화구 단독 rms_threshold를 delta만큼 조정 (사용 여부와 무관하게 저장값 자체를 변경)."""
+        b = self._burner_map.get(bid)
+        if b is None:
+            return
+        flow_cfg = b.setdefault("optical_flow", {})
+        current = flow_cfg.get("rms_threshold", self.get_own_rms_threshold(bid))
+        flow_cfg["rms_threshold"] = round(max(0.0, min(2.0, current + delta)), 2)
+        self._apply_rms_threshold(bid)
+
+    def _apply_rms_threshold(self, bid: int) -> None:
+        """burner_map의 현재 override 설정을 실행 중인 OpticalFlowDetector에 즉시 반영."""
+        b = self._burner_map.get(bid)
+        oflow = self._oflow.get(bid)
+        if b is None or oflow is None:
+            return
+        sc = self._sources_by_id.get(b.get("source_id"), {})
+        merged = _merged_cfg(self._global_flow, sc.get("optical_flow", {}), self._burner_flow_override(b))
+        oflow.rms_threshold = merged.get("rms_threshold", oflow.rms_threshold)
 
     def estimate_roi_coverage(self, source_resolution: tuple[int, int] | None = None) -> dict[int, dict]:
         """카메라별 ROI 합집합 면적을 비율(0~1)로 산출.
@@ -192,8 +254,14 @@ class FrameProcessor:
             frame = frames.get(src_id)
 
             if frame is None:
+                # 카메라 오프라인 → pot_absent_count 누적을 막으면서 타이머는 정상 진행
+                # EMPTY: (False,False) → EMPTY 유지
+                # 그 외: (True,False) → 현재 상태 보존 + STEAMING 타이머 완료 시 정상 전환
                 for bid in burner_ids:
-                    detections[bid] = (False, False)
+                    if self._registry.get(bid).state == BurnerState.EMPTY:
+                        detections[bid] = (False, False)
+                    else:
+                        detections[bid] = (True, False)
                 continue
 
             # ── Phase 1: 카메라 흔들림 보정 ──────────────────────────────
@@ -237,8 +305,8 @@ class FrameProcessor:
             else:
                 dets = self._detector.detect(stabilized)
 
-            bodies  = [d for d in dets if d.class_id == CLASS_POT_BODY   and d.confidence >= 0.3]
-            weights = [d for d in dets if d.class_id == CLASS_POT_WEIGHT and d.confidence >= 0.25]
+            bodies  = [d for d in dets if d.class_id == CLASS_POT_BODY]
+            weights = [d for d in dets if d.class_id == CLASS_POT_WEIGHT]
 
             # ── 밥솥 매칭 (ROI 기반, 독점 그리디) ───────────────────────
             # 가장 가까운 화구가 body를 독점 — 인접 화구 간섭 방지
@@ -297,7 +365,8 @@ class FrameProcessor:
                     matched_has_weight[bid] = (False, (0, 0, 0, 0), None)
 
             # 완료 상태 화구: weight ROI 직접 탐지 (body 종속 없이 독립 체크)
-            _DONE_STATES = (BurnerState.DONE_FIRST, BurnerState.WAIT_SECOND, BurnerState.DONE_SECOND)
+            # WAIT_SECOND는 body 기반으로 pot_present 판단 (weight ROI 이탈로 인한 오전환 방지)
+            _DONE_STATES = (BurnerState.DONE_FIRST, BurnerState.DONE_SECOND)
             weight_in_roi: dict[int, bool] = {}
             for bid in burner_ids:
                 if self._registry.get(bid).state not in _DONE_STATES:
@@ -351,6 +420,8 @@ class FrameProcessor:
                     # current_angle 에 smoothed RMS 저장 (UI 표시용)
                     bsm.current_angle   = self._oflow[bid].last_smoothed_rms if has_wt else None
                     bsm.angle_deviation = self._oflow[bid].last_normalized_rms
+                    bsm.raw_rms         = self._oflow[bid].last_rms
+                    bsm.mask_px         = self._oflow[bid].last_mask_px
 
                 else:
                     if bid in weight_in_roi:

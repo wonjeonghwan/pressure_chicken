@@ -28,6 +28,8 @@ from sources.mf_enum import list_cameras, find_unclaimed
 from core.state_machine import BurnerRegistry
 from core.detector import BurnerDetector
 from core.frame_processor import FrameProcessor
+from core.data_logger import DataLogger
+from core.frame_saver import FrameSaver
 from ui.ui_display import UIDisplay
 
 DEFAULT_CONFIG = "config/store_config.json"
@@ -134,6 +136,21 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     # 4) Processor
     processor = FrameProcessor(sources, burners_cfg, registry, detector, config)
 
+    # 5) Logger
+    logger = DataLogger(log_dir=config.get("log_dir", "logs"))
+
+    # 6-a) FrameSaver — 학습 데이터용 주기 스냅샷 (메인 루프 영향 없음)
+    saver_cfg = config.get("frame_saver", {})
+    frame_saver: FrameSaver | None = None
+    if saver_cfg.get("enabled", True):
+        frame_saver = FrameSaver(
+            sources=sources,
+            log_dir=config.get("log_dir", "logs"),
+            interval_sec=int(saver_cfg.get("interval_sec", 7200)),
+            jpeg_quality=int(saver_cfg.get("jpeg_quality", 92)),
+        )
+        frame_saver.start()
+
     def print_load_diagnostics(proc: FrameProcessor) -> None:
         """카메라별 ROI 합집합 면적 + 화구 수를 콘솔에 출력 — 매장 셋업 진단용."""
         # 각 source의 resize 또는 기본 해상도 추정
@@ -167,15 +184,17 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
             print(f"[diag] Cam-{sid}: burners={n_b}, ROI 합집합={pct:.1f}%  → {tag}")
 
     print_load_diagnostics(processor)
+    logger.log_camera_info(sources)
 
-    # 5) UI
+    # 6) UI
     display = UIDisplay(
-        ui_cfg=ui_cfg, 
-        registry=registry, 
-        burner_meta=burner_meta, 
-        config_data=config, 
-        config_path=config.get("_path"), 
-        model_missing=detector.model_missing
+        ui_cfg=ui_cfg,
+        registry=registry,
+        burner_meta=burner_meta,
+        config_data=config,
+        config_path=config.get("_path"),
+        model_missing=detector.model_missing,
+        logger=logger,
     )
     display.init()
 
@@ -331,6 +350,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
                         # 파일 소스: read() 동기 — 기존 방식 유지
                         current_frames = processor.read_frames()
                         processor.detect_and_update()
+                        logger.update(registry, sources)
                         frame_count += 1
                         _last_detect = now
                 else:
@@ -352,6 +372,9 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     except KeyboardInterrupt:
         pass
     finally:
+        if frame_saver:
+            frame_saver.stop()
+        logger.close()
         display.quit()
         for vs in sources.values():
             vs.release()
