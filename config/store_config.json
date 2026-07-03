@@ -210,8 +210,9 @@
         4
       ],
       "optical_flow": {
-        "rms_threshold": 0.13
-      }
+        "rms_threshold": 0.14
+      },
+      "rms_override_enabled": true
     },
     {
       "id": 6,
@@ -221,17 +222,17 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        328,
-        73,
-        71,
-        81
+        310,
+        58,
+        107,
+        96
       ],
       "grid_pos": [
         0,
         5
       ],
       "optical_flow": {
-        "rms_threshold": 0.12
+        "rms_threshold": 0.13
       }
     },
     {
@@ -252,7 +253,7 @@
         6
       ],
       "optical_flow": {
-        "rms_threshold": 0.14
+        "rms_threshold": 0.15
       }
     },
     {
@@ -377,15 +378,18 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        426,
-        69,
-        106,
-        82
+        427,
+        74,
+        100,
+        90
       ],
       "grid_pos": [
         6,
         10
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.14
+      }
     },
     {
       "id": 15,
@@ -406,7 +410,7 @@
       ],
       "rms_override_enabled": true,
       "optical_flow": {
-        "rms_threshold": 0.14
+        "rms_threshold": 0.1
       }
     },
     {
@@ -428,7 +432,7 @@
       ],
       "rms_override_enabled": true,
       "optical_flow": {
-        "rms_threshold": 0.15
+        "rms_threshold": 0.14
       }
     },
     {
@@ -483,7 +487,10 @@
       "grid_pos": [
         11,
         12
-      ]
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.16
+      }
     },
     {
       "id": 20,

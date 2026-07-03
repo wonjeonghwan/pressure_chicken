@@ -9,7 +9,7 @@ logs/YYYYMMDD.jsonl — 하루 단위 파일, 같은 날 앱 재시작 시 appen
   state_change  : 화구 상태 전환 즉시 기록
   snapshot      : 매초 모든 화구 상태 + RMS + 카메라 상태 기록
 
-15일 초과 파일은 앱 시작 시 자동 삭제.
+7일 초과 파일은 앱 시작 시 자동 삭제.
 """
 
 import json
@@ -22,7 +22,7 @@ class DataLogger:
     def __init__(self, log_dir: str = "logs"):
         os.makedirs(log_dir, exist_ok=True)
         self._log_dir = log_dir
-        self._cleanup_old_logs(keep_days=15)
+        self._cleanup_old_logs(keep_days=7)
 
         now = datetime.now()
         self._session_id  = now.strftime("%Y%m%d_%H%M%S")
@@ -148,7 +148,7 @@ class DataLogger:
             except ValueError:
                 continue
         if removed:
-            print(f"[logger] 오래된 로그 {removed}개 삭제 (15일 초과)")
+            print(f"[logger] 오래된 로그 {removed}개 삭제 (7일 초과)")
 
     def close(self) -> None:
         duration = round(time.time() - self._start_time, 1)

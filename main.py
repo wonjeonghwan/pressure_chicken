@@ -140,16 +140,17 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     logger = DataLogger(log_dir=config.get("log_dir", "logs"))
 
     # 6-a) FrameSaver — 학습 데이터용 주기 스냅샷 (메인 루프 영향 없음)
-    saver_cfg = config.get("frame_saver", {})
+    # 2026-07-04: 이미지 저장 불필요 → 비활성화
+    # saver_cfg = config.get("frame_saver", {})
     frame_saver: FrameSaver | None = None
-    if saver_cfg.get("enabled", True):
-        frame_saver = FrameSaver(
-            sources=sources,
-            log_dir=config.get("log_dir", "logs"),
-            interval_sec=int(saver_cfg.get("interval_sec", 7200)),
-            jpeg_quality=int(saver_cfg.get("jpeg_quality", 92)),
-        )
-        frame_saver.start()
+    # if saver_cfg.get("enabled", True):
+    #     frame_saver = FrameSaver(
+    #         sources=sources,
+    #         log_dir=config.get("log_dir", "logs"),
+    #         interval_sec=int(saver_cfg.get("interval_sec", 7200)),
+    #         jpeg_quality=int(saver_cfg.get("jpeg_quality", 92)),
+    #     )
+    #     frame_saver.start()
 
     def print_load_diagnostics(proc: FrameProcessor) -> None:
         """카메라별 ROI 합집합 면적 + 화구 수를 콘솔에 출력 — 매장 셋업 진단용."""
