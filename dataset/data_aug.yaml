@@ -2,4 +2,4 @@ train: train_aug/images
 val: valid_aug/images
 
 nc: 3
-names: ['empty_burner', 'pot_body', 'pot_weight']
+names: ['body', 'pot_weight', 'vent']

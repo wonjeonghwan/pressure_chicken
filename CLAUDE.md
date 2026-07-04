@@ -68,13 +68,18 @@ DONE_SECOND → EMPTY           : pot 이탈 (최종 상태)
 ## YOLO 학습 클래스 (3가지)
 
 ```yaml
-# dataset/dataset.yaml
+# dataset/data_aug.yaml (2026-07 재학습부터 — body 세그멘테이션 전환 + vent 추가)
 nc: 3
 names:
-  0: empty_burner   # 빈 화구 (밥솥 없음)
-  1: pot_body       # 밥솥 몸체 (기준점 역할)
-  2: pot_weight     # 딸랑이 (추)
+  0: body        # 밥솥 몸체 (기준점 역할, 세그멘테이션)
+  1: pot_weight   # 딸랑이 (추)
+  2: vent         # 증기 배출구 — 학습만 시키고 실사용 안 함(weight와 혼동 방지 목적)
 ```
+
+> empty_burner 클래스는 2026-07 재학습부터 데이터셋에서 빠졌다(운영 코드에서도 원래
+> 미사용 — EMPTY 상태는 pot_body 부재로 판정하지, 별도 클래스로 판정하지 않는다).
+> `core/detector.py`의 `CLASS_POT_BODY`/`CLASS_POT_WEIGHT` 상수가 이 순서와 반드시
+> 일치해야 하며, 재학습 후 모델 교체와 상수 변경은 항상 동시에 이루어져야 한다.
 
 현재 모델: `models/pot_seg.pt` (yolov8n-seg 기반 segmentation 모델)
 

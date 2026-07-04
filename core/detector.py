@@ -4,10 +4,11 @@ YOLO-seg 추론 래퍼
 모델 파일이 없으면 model_missing = True 플래그를 설정하고
 detect()는 빈 리스트를 반환한다.
 
-클래스 정의:
-  0: empty_burner  — 빈 화구
-  1: pot_body      — 밥솥 몸체 (기준점)
-  2: pot_weight    — 딸랑이 (추)
+클래스 정의 (2026-07 재학습 이후 — body 세그멘테이션 전환 + vent 추가로 인덱스 변경됨):
+  0: body        — 밥솥 몸체 (기준점)
+  1: pot_weight  — 딸랑이 (추)
+  2: vent        — 증기 배출구. 학습에는 포함되지만(weight와 혼동 방지 목적) 실사용 안 함 —
+                   detect_batch()가 반환은 하되 frame_processor 등에서 필터링하지 않음
 """
 
 import os
@@ -17,9 +18,9 @@ import cv2
 import numpy as np
 
 
-CLASS_EMPTY_BURNER = 0
-CLASS_POT_BODY     = 1
-CLASS_POT_WEIGHT   = 2
+CLASS_POT_BODY   = 0
+CLASS_POT_WEIGHT = 1
+CLASS_VENT       = 2  # 미사용 상수 — weight와 구분해 학습만 시킨 클래스
 
 
 @dataclass

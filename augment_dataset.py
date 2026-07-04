@@ -15,11 +15,28 @@ YOLO Segmentation 라벨 형식:
 import os
 import cv2
 import glob
+import numpy as np
 from pathlib import Path
 import albumentations as A
 
 
 _MAX_PTS = 500  # 폴리곤 꼭짓점 최대 수 (인코딩용 상한, 넘을 일 없음)
+
+
+def _imread_unicode(path: str):
+    """cv2.imread는 Windows에서 비-ASCII(한글 등) 경로를 못 읽으므로 우회."""
+    data = np.fromfile(path, dtype=np.uint8)
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def _imwrite_unicode(path: str, img) -> bool:
+    """cv2.imwrite의 비-ASCII 경로 쓰기 실패를 우회."""
+    ext = os.path.splitext(path)[1]
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        return False
+    buf.tofile(path)
+    return True
 
 
 def _read_labels(lbl_path: str, iw: int, ih: int):
@@ -177,7 +194,7 @@ def _apply_and_save(transform, img, polygons, class_labels, bboxes, row_indices,
             result['keypoints'], result['kp_labels'],
             t_iw, t_ih, orig_poly_lens,
         )
-        cv2.imwrite(out_img_path, t_img)
+        _imwrite_unicode(out_img_path, t_img)
         _write_labels(out_lbl_path, new_rows)
         return True
     except Exception as e:
@@ -220,8 +237,9 @@ def augment_dataset(image_dir, label_dir, output_img_dir, output_lbl_dir, num_au
         base_name = Path(img_path).stem
         lbl_path = os.path.join(label_dir, base_name + ".txt")
 
-        img = cv2.imread(img_path)
+        img = _imread_unicode(img_path)
         if img is None:
+            print(f"이미지 읽기 실패, 스킵: {img_path}")
             continue
         ih, iw = img.shape[:2]
 
@@ -229,7 +247,7 @@ def augment_dataset(image_dir, label_dir, output_img_dir, output_lbl_dir, num_au
         orig_poly_lens = {ri: len(poly) for ri, poly in zip(row_indices, polygons)}
 
         # 1) 원본 저장
-        cv2.imwrite(os.path.join(output_img_dir, f"{base_name}_orig.jpg"), img)
+        _imwrite_unicode(os.path.join(output_img_dir, f"{base_name}_orig.jpg"), img)
         _write_labels(os.path.join(output_lbl_dir, f"{base_name}_orig.txt"), rows)
 
         # 2) 고정 flip 3종

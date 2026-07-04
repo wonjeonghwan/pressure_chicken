@@ -3,11 +3,11 @@ val: ../valid/images
 test: ../test/images
 
 nc: 3
-names: ['empty_burner', 'pot_body', 'pot_weight']
+names: ['body', 'pot_weight', 'vent']
 
 roboflow:
   workspace: personal-ebvkg
-  project: pressure_chicken_segmentation
-  version: 1
+  project: pressure_chicken_segmentation-weight-vent-only
+  version: dataset
   license: CC BY 4.0
-  url: https://universe.roboflow.com/personal-ebvkg/pressure_chicken_segmentation/dataset/1
+  url: https://universe.roboflow.com/personal-ebvkg/pressure_chicken_segmentation-weight-vent-only/dataset/dataset
