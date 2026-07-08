@@ -113,24 +113,11 @@ class FrameProcessor:
 
     # ── 화구별 rms_threshold 단독(override) 설정 — 개발자 모드 UI용 ──────────
     def _burner_flow_override(self, b: dict) -> dict:
-        """burner.optical_flow 를 병합에 반영할지 여부. rms_override_enabled가 없으면
-        기존 방식(하위호환)대로 optical_flow.rms_threshold가 있으면 그냥 사용."""
-        enabled = b.get("rms_override_enabled")
-        if enabled is None:
-            enabled = "rms_threshold" in b.get("optical_flow", {})
-        return b.get("optical_flow", {}) if enabled else {}
+        """optical_flow.rms_threshold가 설정된 화구만 병합에 반영 (설정 여부 자체가 활성화 신호)."""
+        return b.get("optical_flow", {}) if "rms_threshold" in b.get("optical_flow", {}) else {}
 
     def get_global_rms_threshold(self) -> float:
         return self._global_flow.get("rms_threshold", 0.5)
-
-    def get_rms_override_enabled(self, bid: int) -> bool:
-        b = self._burner_map.get(bid)
-        if b is None:
-            return False
-        enabled = b.get("rms_override_enabled")
-        if enabled is None:
-            enabled = "rms_threshold" in b.get("optical_flow", {})
-        return bool(enabled)
 
     def get_own_rms_threshold(self, bid: int) -> float:
         """화구 단독 override 값 (사용 여부와 무관하게 저장된 수치). 없으면 현재 유효값을 기본으로."""
@@ -142,15 +129,6 @@ class FrameProcessor:
             return own
         oflow = self._oflow.get(bid)
         return oflow.rms_threshold if oflow else self.get_global_rms_threshold()
-
-    def set_rms_override_enabled(self, bid: int, enabled: bool) -> None:
-        b = self._burner_map.get(bid)
-        if b is None:
-            return
-        b["rms_override_enabled"] = enabled
-        if enabled and "rms_threshold" not in b.get("optical_flow", {}):
-            b.setdefault("optical_flow", {})["rms_threshold"] = self.get_own_rms_threshold(bid)
-        self._apply_rms_threshold(bid)
 
     def adjust_own_rms_threshold(self, bid: int, delta: float) -> None:
         """화구 단독 rms_threshold를 delta만큼 조정 (사용 여부와 무관하게 저장값 자체를 변경)."""

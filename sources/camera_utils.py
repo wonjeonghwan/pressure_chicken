@@ -18,6 +18,20 @@ def save_config(path: str | None, config: dict) -> None:
         print(f"[camera_utils] config 저장 실패: {e}")
 
 
+def _probe_index(index: int) -> bool:
+    """존재 여부만 빠르게 확인하는 프로브 (DSHOW 사용).
+
+    실사용 캡처는 MSMF(HW_ACCELERATION=NONE)로 여는데, 없는 index를 MSMF로 열어보면
+    실패까지 훨씬 오래 걸려(수 초) switch_camera가 여러 index를 순회할 때 화면이
+    멎은 것처럼 보인다. DSHOW는 없는 index에 대해 훨씬 빨리 실패하므로, 존재 여부
+    확인은 DSHOW로 가볍게 하고 실제로 쓸 index만 open_camera()로 MSMF 정식 오픈한다.
+    """
+    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(index)
+    ok = cap.isOpened()
+    cap.release()
+    return ok
+
+
 def open_camera(index: int) -> VideoSource | None:
     """지정 MSMF index로 카메라를 열고 프레임까지 확인. 실패 시 None."""
     cfg = {"type": "camera", "index": index}
@@ -68,6 +82,8 @@ def switch_camera(
     for i in range(1, max_try + 1):
         next_index = (current_index + i) % max_try
         if next_index in used:
+            continue
+        if not _probe_index(next_index):
             continue
         vs = open_camera(next_index)
         if vs is None:

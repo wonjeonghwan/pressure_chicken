@@ -22,6 +22,9 @@ class VideoSource:
     _RECONNECT_THRESHOLD = 10   # 연속 실패 N회 시 재연결 시도
     _RECONNECT_COOLDOWN  = 5.0  # 재연결 시도 최소 간격 (초) — MSMF 해제 안정화 여유
     _STALE_THRESHOLD     = 5.0  # 마지막 프레임으로부터 이 시간(초) 초과 시 stale 처리
+    _DEFAULT_FRAME_WIDTH  = 1920  # 카메라 요청 해상도 (미지원 시 아래 폴백 해상도로 순차 시도)
+    _DEFAULT_FRAME_HEIGHT = 1080
+    _RESOLUTION_FALLBACKS = ((1280, 720), (640, 480))  # 요청 해상도로 프레임을 못 읽을 때 순서대로 재시도
 
     def __init__(self, source_cfg: dict):
         self._cfg = source_cfg
@@ -49,15 +52,7 @@ class VideoSource:
                 self._cap = cv2.VideoCapture(fallback)
         else:
             index = self._cfg.get("index", 0)
-            if sys.platform == "win32":
-                # CAP_PROP_HW_ACCELERATION=NONE: MSMF D3D11 HW 컬러 변환 파이프라인 비활성화
-                # — Nvidia 환경에서 일부 USB 카메라 드라이버와 조합 시 YUV→BGR 밝기 과도 상승(블리칭) 버그 방지
-                self._cap = cv2.VideoCapture(
-                    index, cv2.CAP_MSMF,
-                    [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
-                )
-            else:
-                self._cap = cv2.VideoCapture(index)
+            self._cap = self._open_camera_with_fallback(index)
 
         if not self._cap.isOpened():
             print(f"[VideoSource] 경고: 소스 열기 실패 ({self._cfg}). 빈 프레임으로 동작합니다.")
@@ -76,9 +71,58 @@ class VideoSource:
             else:
                 print(f"[VideoSource] 노출 설정 미지원 (카메라 드라이버 불가) — gamma로 대체 권장")
 
+    def _open_camera_cv(self, index: int, width: int, height: int) -> cv2.VideoCapture:
+        """지정 해상도로 cv2.VideoCapture 생성 (isOpened 여부는 호출부에서 확인)."""
+        if sys.platform == "win32":
+            # CAP_PROP_HW_ACCELERATION=NONE: MSMF D3D11 HW 컬러 변환 파이프라인 비활성화
+            # — Nvidia 환경에서 일부 USB 카메라 드라이버와 조합 시 YUV→BGR 밝기 과도 상승(블리칭) 버그 방지
+            return cv2.VideoCapture(
+                index, cv2.CAP_MSMF,
+                [
+                    cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE,
+                    cv2.CAP_PROP_FRAME_WIDTH, width,
+                    cv2.CAP_PROP_FRAME_HEIGHT, height,
+                ],
+            )
+        cap = cv2.VideoCapture(index)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        return cap
+
+    def _open_camera_with_fallback(self, index: int) -> cv2.VideoCapture:
+        """요청 해상도(기본 1920x1080)로 열기 시도 → 실제 프레임을 못 읽으면 더 작은 표준 해상도로 순차 폴백.
+
+        일부 카메라/드라이버 조합은 미지원 해상도 요청 시 isOpened()는 True를 반환하면서도
+        read()가 계속 실패하는 경우가 있어, get()으로 협상 결과만 확인하는 것으로는 불충분함.
+        """
+        width = self._cfg.get("frame_width", self._DEFAULT_FRAME_WIDTH)
+        height = self._cfg.get("frame_height", self._DEFAULT_FRAME_HEIGHT)
+        primary = (width, height)
+        fallbacks = [(w, h) for (w, h) in self._RESOLUTION_FALLBACKS if w < width]
+        candidates = [primary] + fallbacks
+
+        for requested_w, requested_h in candidates:
+            cap = self._open_camera_cv(index, requested_w, requested_h)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            ret, _ = cap.read()
+            if not ret:
+                cap.release()
+                continue
+            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fallback_note = "" if (requested_w, requested_h) == primary else \
+                f" (요청 {primary[0]}x{primary[1]} 실패 → {requested_w}x{requested_h}로 폴백)"
+            print(f"[VideoSource] 카메라 index={index} 해상도 {actual_w}x{actual_h} 로 열림{fallback_note}")
+            return cap
+
+        print(f"[VideoSource] 카메라 index={index}: 시도한 모든 해상도({[primary] + fallbacks})에서 프레임을 읽지 못함")
+        return cv2.VideoCapture()  # 닫힌 capture 반환 — 호출부에서 isOpened()==False로 처리
+
     def _try_reconnect(self) -> None:
         """카메라 재연결 시도 (카메라 소스 전용)."""
-        import sys, time
+        import time
         now = time.monotonic()
         if now - self._last_reconnect < self._RECONNECT_COOLDOWN:
             return
@@ -89,13 +133,7 @@ class VideoSource:
             self._cap.release()
             self._cap = None
             time.sleep(0.5)  # MSMF가 장치 핸들을 완전히 해제할 시간
-        if sys.platform == "win32":
-            cap = cv2.VideoCapture(
-                index, cv2.CAP_MSMF,
-                [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
-            )
-        else:
-            cap = cv2.VideoCapture(index)
+        cap = self._open_camera_with_fallback(index)
         if cap.isOpened():
             self._cap = cap
             self._fail_count = 0

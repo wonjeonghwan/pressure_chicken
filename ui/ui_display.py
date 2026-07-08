@@ -71,8 +71,7 @@ class UIDisplay:
         self._reset_rects: dict[int, pygame.Rect] = {}
         self._start_rects: dict[int, pygame.Rect] = {}
 
-        # 개발자 모드 — 화구별 단독 rms_threshold 체크박스/조정 삼각형 (dev_mode에서만 채워짐)
-        self._rms_toggle_rects: dict[int, pygame.Rect] = {}
+        # 개발자 모드 — 화구별 단독 rms_threshold 조정 삼각형 (dev_mode에서만 채워짐)
         self._rms_up_rects:     dict[int, pygame.Rect] = {}
         self._rms_down_rects:   dict[int, pygame.Rect] = {}
         self._last_processor = None  # render()에서 매 프레임 갱신 — 이벤트 핸들러에서 참조용
@@ -102,6 +101,7 @@ class UIDisplay:
         self._calib_resize_dir: str | None = None    # 'nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'
         self._calib_op_origin: list | None = None    # 드래그 시작 시점 roi [x,y,w,h]
         self._calib_op_start: tuple | None = None    # 드래그 시작 시점 video pos (vx, vy)
+        self._calib_cross_target: tuple[int, int, int] | None = None  # 'move' 중 다른 카메라 위 (src_id, vx, vy)
 
         # 통합 캔버스 배치 모드 — 카메라 박스 + 화구 카드를 반칸(half-cell) 단위 그리드에 자유 배치
         self.layout_mode = False
@@ -212,24 +212,31 @@ class UIDisplay:
         self._calib_resize_dir = None
         self._calib_op_origin = None
         self._calib_op_start = None
+        self._calib_cross_target = None
         self._selected_id = None
         self._selected_camera_id = None  # 캘리브 진입 시 카메라 선택 해제
         print("[UI] 캘리브레이션 가이드 모드 시작")
 
     def _renumber_calib(self) -> None:
-        """저장 정책: 카메라 화면상 배치 순서(좌상단→우하단) + 같은 카메라 안에선 list 위치(=그린 순서) 유지.
+        """저장 정책: 카메라별로 화구를 묶되, 카메라 묶음 순서는 리스트에 처음 등장한 순서를
+        그대로 유지 (같은 카메라 안에서는 기존 list 위치 = 그린/정렬 순서 유지).
 
-        주의: source_id는 카메라가 추가된 순서(내부 식별자)일 뿐 화면에 보이는 위치와 무관함
-        (카메라는 배치 모드(L)에서 자유롭게 이동 가능). source_id로 정렬하면 사용자가 화면에서
-        "첫 번째 카메라"라고 인식하는 카메라와 실제 ID 1번을 받는 카메라가 어긋나는 버그가
-        있었음 — 예: 화면상 1번째 카메라에 1~5번을 그렸는데 2번째 카메라가 source_id가 더
-        작다는 이유로 1~5번을 가져가 버림. 화면 배치(layout_pos) 기준으로 정렬해 사용자가
-        보는 순서와 부여되는 번호가 항상 일치하도록 한다.
+        주의: 예전엔 화면 배치(layout_pos, row/col) 기준으로 정렬했었다 — 그런데 배치 모드(L)에서
+        카메라 위치를 옮기기만 해도 전체 화구 번호가 재배정되어 버리는 부작용이 있었음
+        (예: 1번 카메라에 1~5번을 그려놨는데, 카메라를 화면상 다른 자리로 옮긴 뒤 F모드에서
+        아무 화구나 하나만 옮기고 저장해도 1~5번이 엉뚱한 카메라로 넘어가 버림). 화면 위치는
+        배치 모드에서 언제든 바뀔 수 있는 값이라 정렬 기준으로 쓰기엔 불안정함. 대신 카메라
+        묶음 순서를 "화구 리스트에 이미 존재하던 순서"로 고정하면, 배치 모드에서 카메라를
+        옮기는 것만으로는 번호가 절대 바뀌지 않는다. 신규 카메라의 첫 화구는 그릴 때 리스트
+        맨 뒤에 추가되므로 자연히 새 그룹으로 이어붙는다.
 
-        결과 예시 (화면 좌상단부터):
-            화면 1번째 카메라 화구 2개 → ID 1, 2
-            화면 2번째 카메라 화구 3개 → ID 3, 4, 5
-            화면 3번째 카메라 화구 1개 → ID 6
+        번호 재부여 정책: 기존에 이미 번호(id)가 있는 화구는 절대 건드리지 않는다 — 화구를
+        지웠다가(또는 카메라를 뽑았다가) 다시 그려도 남아있는 다른 화구들의 번호가 밀리지
+        않도록 하기 위함(카드 위치는 번호에 귀속되므로, 번호가 안 밀려야 [[_burner_grid_pos]]로
+        기억해둔 위치도 계속 맞게 적용된다). 새로 그려서 아직 id가 없는(None) 화구만 가장 작은
+        빈 번호를 채워 넣는다 — 그 결과 번호에 구멍(1,2,5,6처럼)이 생길 수 있지만, 지워진
+        카메라를 재연결해 같은 개수/순서로 다시 그리면 예전 빈 번호를 그대로 재사용하게 되어
+        해당 번호에 저장된 카드 위치를 자동으로 되찾는다.
 
         선택된 화구 인덱스도 재정렬 후 동일 화구를 가리키도록 갱신.
         """
@@ -239,12 +246,26 @@ class UIDisplay:
             else None
         )
 
-        # 화면 배치(row, col) 오름차순 정렬 (안정 정렬이라 같은 카메라 안의 그린 순서는 보존됨)
-        self._calib_burners.sort(key=lambda b: self._camera_layout_pos(b.get("source_id", 0)))
+        # source_id별로 묶되, 그룹 순서는 리스트에 처음 등장한 순서 그대로 (화면 배치와 무관)
+        group_order: list[int] = []
+        groups: dict[int, list[dict]] = {}
+        for b in self._calib_burners:
+            sid = b.get("source_id", 0)
+            if sid not in groups:
+                groups[sid] = []
+                group_order.append(sid)
+            groups[sid].append(b)
+        self._calib_burners = [b for sid in group_order for b in groups[sid]]
 
-        # 1부터 ID 재부여
-        for i, b in enumerate(self._calib_burners):
-            b["id"] = i + 1
+        # 아직 번호가 없는(None) 화구에만 가장 작은 빈 번호를 채움 — 기존 번호는 그대로 유지
+        used_ids = {b["id"] for b in self._calib_burners if b.get("id") is not None}
+        next_candidate = 1
+        for b in self._calib_burners:
+            if b.get("id") is None:
+                while next_candidate in used_ids:
+                    next_candidate += 1
+                b["id"] = next_candidate
+                used_ids.add(next_candidate)
 
         # 선택 인덱스 재바인딩
         if selected_obj is not None:
@@ -254,7 +275,12 @@ class UIDisplay:
                 self._calib_selected_idx = None
 
     def _move_selected_within_camera(self, direction: int) -> bool:
-        """선택된 화구를 같은 카메라 안에서 한 칸 이동. direction=-1=앞, +1=뒤. 성공 시 True."""
+        """선택된 화구를 같은 카메라 안에서 한 칸 이동. direction=-1=앞, +1=뒤. 성공 시 True.
+
+        번호(id)는 이제 _renumber_calib에서 자동으로 밀리지 않으므로(구멍 허용 정책), 이 조작은
+        위치와 함께 두 화구의 id 값을 직접 맞바꿔 "번호 순서를 바꾼다"는 원래 의도를 유지한다
+        — 사용자가 [ / ] 키로 명시적으로 요청한 경우에만 번호가 바뀐다.
+        """
         if self._calib_selected_idx is None:
             return False
         n = len(self._calib_burners)
@@ -268,11 +294,11 @@ class UIDisplay:
         step = 1 if direction > 0 else -1
         target_idx = cur_idx + step
         while 0 <= target_idx < n:
-            if self._calib_burners[target_idx].get("source_id", 0) == sid:
-                # 두 항목 swap
-                self._calib_burners[cur_idx], self._calib_burners[target_idx] = (
-                    self._calib_burners[target_idx], self._calib_burners[cur_idx],
-                )
+            other = self._calib_burners[target_idx]
+            if other.get("source_id", 0) == sid:
+                # 두 항목의 위치와 번호(id)를 함께 맞바꿈
+                cur["id"], other["id"] = other["id"], cur["id"]
+                self._calib_burners[cur_idx], self._calib_burners[target_idx] = other, cur
                 self._calib_selected_idx = target_idx
                 self._renumber_calib()
                 return True
@@ -306,6 +332,18 @@ class UIDisplay:
         return [row_group * 2, idx_in_row * 2]
 
     def _burner_grid_pos(self, bid: int) -> list[int]:
+        """카드 위치는 화구 번호(id)에 영구적으로 귀속된 card_positions에서 우선 조회한다.
+
+        burners 리스트의 화구 항목 자체는 카메라 제거/ROI 재캘리브레이션 때마다 통째로
+        지워졌다 다시 생기지만(그 번호가 나중에 재사용될 수도, 안 될 수도 있음),
+        card_positions는 배치(L) 모드에서만 기록되고 그 외엔 절대 지워지지 않으므로,
+        같은 번호가 사라졌다 다시 생겨도(예: 카메라 재연결 후 재캘리브레이션) 배치 모드로
+        한 번 잡아둔 위치를 그대로 유지한다.
+        """
+        pos = self.config_data.get("card_positions", {}).get(str(bid))
+        if pos is not None:
+            r, c = pos
+            return [int(r), int(c)]
         cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
         if cfg and "grid_pos" in cfg:
             r, c = cfg["grid_pos"]
@@ -366,10 +404,12 @@ class UIDisplay:
         self.layout_mode = False
         self._layout_drag_kind = None
         self._layout_drag_id = None
+        card_positions = self.config_data.setdefault("card_positions", {})
         for b in self.config_data.get("burners", []):
             pos = self._layout_positions.get(b["id"])
             if pos is not None:
                 b["grid_pos"] = [int(pos[0]), int(pos[1])]
+                card_positions[str(b["id"])] = [int(pos[0]), int(pos[1])]
         for sc in self.config_data.get("sources", []):
             pos = self._layout_camera_positions.get(sc["id"])
             if pos is not None:
@@ -683,15 +723,6 @@ class UIDisplay:
                     self._show_toast(f"Cam-{target_sid} 제거 실패")
             return
 
-        # 개발자 모드 - 화구 단독 rms_threshold 사용 토글
-        for bid, rect in self._rms_toggle_rects.items():
-            if rect.collidepoint(pos):
-                if self._last_processor is not None:
-                    enabled = self._last_processor.get_rms_override_enabled(bid)
-                    self._last_processor.set_rms_override_enabled(bid, not enabled)
-                    self._persist_config_data()
-                return
-
         # 개발자 모드 - 화구 단독 rms_threshold 0.01 단위 조정
         for bid, rect in self._rms_up_rects.items():
             if rect.collidepoint(pos):
@@ -755,15 +786,25 @@ class UIDisplay:
             return
         if self.calibration_mode and self._calib_op is not None:
             v_pos = self._to_video_pos(pos)
-            if v_pos and v_pos[0] == self._calib_active_source:
-                src_id, vx, vy = v_pos
-                if self._calib_op == 'new':
-                    self._calib_drag_end = (vx, vy)
-                elif self._calib_op == 'move' and self._calib_selected_idx is not None:
+
+            if self._calib_op == 'move' and self._calib_selected_idx is not None:
+                if v_pos and v_pos[0] == self._calib_active_source:
+                    self._calib_cross_target = None
+                    _, vx, vy = v_pos
                     ox, oy, ow, oh = self._calib_op_origin
                     dx = vx - self._calib_op_start[0]
                     dy = vy - self._calib_op_start[1]
                     self._calib_burners[self._calib_selected_idx]["roi"] = [ox + dx, oy + dy, ow, oh]
+                else:
+                    # 다른 카메라 위(혹은 영상 바깥)로 드래그 중 — 원래 위치는 그대로 두고
+                    # 드롭 지점만 기록해 미리보기로 보여준다 (마우스 뗄 때 실제로 소속 변경)
+                    self._calib_cross_target = v_pos
+                return
+
+            if v_pos and v_pos[0] == self._calib_active_source:
+                _, vx, vy = v_pos
+                if self._calib_op == 'new':
+                    self._calib_drag_end = (vx, vy)
                 elif self._calib_op == 'resize' and self._calib_selected_idx is not None:
                     self._apply_calib_resize(vx, vy)
 
@@ -805,9 +846,8 @@ class UIDisplay:
                     x2, y2 = self._calib_drag_end
                     roi = [min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1)]
                     if roi[2] > 20 and roi[3] > 20:
-                        next_id = len(self._calib_burners) + 1
                         self._calib_burners.append({
-                            "id": next_id,
+                            "id": None,  # _renumber_calib()가 가장 작은 빈 번호를 채워줌
                             "source_id": self._calib_active_source,
                             "countdown_first": 720,
                             "countdown_second": 270,
@@ -815,8 +855,23 @@ class UIDisplay:
                             "pot_absent_threshold": 30,
                             "roi": roi
                         })
+                        self._renumber_calib()
                 self._calib_drag_start = None
                 self._calib_drag_end = None
+            elif self._calib_op == 'move' and self._calib_selected_idx is not None and self._calib_cross_target is not None:
+                new_src, vx, vy = self._calib_cross_target
+                b = self._calib_burners[self._calib_selected_idx]
+                if new_src != b.get("source_id"):
+                    _, _, rw, rh = b["roi"]
+                    cell = self._cam_cells.get(new_src)
+                    frame_w, frame_h = cell["frame_size"] if cell else (vx + rw, vy + rh)
+                    new_x = max(0, min(max(0, frame_w - rw), vx - rw // 2))
+                    new_y = max(0, min(max(0, frame_h - rh), vy - rh // 2))
+                    b["source_id"] = new_src
+                    b["roi"] = [new_x, new_y, rw, rh]
+                    self._show_toast(f"화구를 Cam-{new_src}로 이동함")
+                    self._renumber_calib()
+            self._calib_cross_target = None
             self._calib_op = None
             self._calib_resize_dir = None
             self._calib_op_origin = None
@@ -966,7 +1021,6 @@ class UIDisplay:
         self._card_rects.clear()
         self._start_rects.clear()
         self._reset_rects.clear()
-        self._rms_toggle_rects.clear()
         self._rms_up_rects.clear()
         self._rms_down_rects.clear()
 
@@ -1012,8 +1066,20 @@ class UIDisplay:
             # 좌표 매핑은 비워둠 (드래그 불가)
             return
 
-        # ── 이 카메라 소속 화구의 ROI / 감지 결과만 오버레이 ─────────────
-        vis = frame.copy()
+        # ── 화면 표시 크기로 먼저 축소 (오버레이/색변환 비용을 표시 해상도로 제한) ──
+        # 원본(카메라) 해상도가 화면 셀보다 훨씬 크므로, 축소를 먼저 하고
+        # 오버레이 좌표를 scale만큼 줄여서 작은 이미지 위에 그리면
+        # cvtColor/rectangle/fillPoly 등의 픽셀 연산 비용이 scale^2배로 줄어든다.
+        oh, ow = frame.shape[:2]
+        scale = min(cw / ow, video_area_h / oh)
+        nw, nh = max(1, int(ow * scale)), max(1, int(oh * scale))
+        vis = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
+
+        def _s(v: float) -> int:
+            return int(round(v * scale))
+
+        line_w = max(1, _s(2))
+        thin_w = max(1, _s(1))
 
         if not self.calibration_mode:
             burners_of_src = [b for b in self.config_data.get("burners", []) if b.get("source_id") == src_id]
@@ -1026,58 +1092,65 @@ class UIDisplay:
 
                 if "roi" in cfg:
                     x, y, w, h = cfg["roi"]
-                    cv2.rectangle(vis, (x, y), (x + w, y + h), (100, 100, 100), 1)
+                    cv2.rectangle(vis, (_s(x), _s(y)), (_s(x + w), _s(y + h)), (100, 100, 100), thin_w)
 
                 if processor:
                     r_c, g_c, b_c = bsm.color
                     color_bgr = (b_c, g_c, r_c)
 
                     if bid in processor.last_matched_boxes:
-                        bx1, by1, bx2, by2 = processor.last_matched_boxes[bid]
-                        cv2.rectangle(vis, (bx1, by1), (bx2, by2), color_bgr, 1)
-                        length = 12
+                        bx1, by1, bx2, by2 = (_s(v) for v in processor.last_matched_boxes[bid])
+                        cv2.rectangle(vis, (bx1, by1), (bx2, by2), color_bgr, thin_w)
+                        length = max(2, _s(12))
                         for pt1, pt2 in [
                             ((bx1, by1), (bx1+length, by1)), ((bx1, by1), (bx1, by1+length)),
                             ((bx2, by1), (bx2-length, by1)), ((bx2, by1), (bx2, by1+length)),
                             ((bx1, by2), (bx1+length, by2)), ((bx1, by2), (bx1, by2-length)),
                             ((bx2, by2), (bx2-length, by2)), ((bx2, by2), (bx2, by2-length))
                         ]:
-                            cv2.line(vis, pt1, pt2, color_bgr, 2)
+                            cv2.line(vis, pt1, pt2, color_bgr, line_w)
 
                         text = f"#{bid}"
-                        fs = 1.2 if self.dev_mode else 0.5
-                        thick = 3 if self.dev_mode else 1
+                        fs = max(0.3, (1.2 if self.dev_mode else 0.5) * scale)
+                        thick = max(1, _s(3 if self.dev_mode else 1))
                         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
-                        cv2.rectangle(vis, (bx1, by1 - th - 6), (bx1 + tw + 6, by1), color_bgr, -1)
+                        pad = max(1, _s(6))
+                        cv2.rectangle(vis, (bx1, by1 - th - pad), (bx1 + tw + pad, by1), color_bgr, -1)
                         text_c = (0, 0, 0) if (g_c > 150 or r_c > 150) else (255, 255, 255)
-                        cv2.putText(vis, text, (bx1 + 3, by1 - 3), cv2.FONT_HERSHEY_SIMPLEX, fs, text_c, thick)
+                        cv2.putText(vis, text, (bx1 + max(1, _s(3)), by1 - max(1, _s(3))), cv2.FONT_HERSHEY_SIMPLEX, fs, text_c, thick)
 
                     if bid in processor.last_weight_boxes:
-                        wx1, wy1, wx2, wy2 = processor.last_weight_boxes[bid]
+                        wx1, wy1, wx2, wy2 = (_s(v) for v in processor.last_weight_boxes[bid])
                         if self.show_mask and bid in processor.last_mask_xys:
-                            pts = processor.last_mask_xys[bid].astype(np.int32)
+                            pts = (processor.last_mask_xys[bid] * scale).astype(np.int32)
                             overlay = vis.copy()
                             cv2.fillPoly(overlay, [pts], (0, 200, 255))
                             cv2.addWeighted(overlay, 0.4, vis, 0.6, 0, vis)
-                            cv2.polylines(vis, [pts], True, (0, 180, 255), 1)
+                            cv2.polylines(vis, [pts], True, (0, 180, 255), thin_w)
                         if self.show_mask:
-                            cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (255, 255, 255), 1)
+                            cv2.rectangle(vis, (wx1, wy1), (wx2, wy2), (255, 255, 255), thin_w)
                             score = bsm.vibration_score
-                            cv2.rectangle(vis, (wx1, wy2+3), (wx2, wy2+8), (60, 60, 60), -1)
+                            g1, g2 = max(1, _s(3)), max(2, _s(8))
+                            cv2.rectangle(vis, (wx1, wy2+g1), (wx2, wy2+g2), (60, 60, 60), -1)
                             fill_w = int((wx2 - wx1) * min(score, 1.0))
                             cgauge = (0, 200, 0) if score < 1.0 else (0, 60, 255)
                             if fill_w > 0:
-                                cv2.rectangle(vis, (wx1, wy2+3), (wx1+fill_w, wy2+8), cgauge, -1)
+                                cv2.rectangle(vis, (wx1, wy2+g1), (wx1+fill_w, wy2+g2), cgauge, -1)
                             if self.dev_mode and bsm.current_angle is not None:
+                                # 예전엔 0.4*scale(최소 0.25)로 축소되어 카메라 박스가 작으면 거의
+                                # 안 보였음 — 기준 크기를 크게 올리고 검은 테두리(stroke)를 둘러
+                                # 어떤 배경 위에서도 잘 읽히게 함.
                                 score_txt = f"RMS: {bsm.current_angle:.3f}"
-                                cv2.putText(vis, score_txt, (wx1, wy1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+                                rms_fs = max(0.6, 0.9 * scale)
+                                rms_thick = max(2, _s(3))
+                                rms_pos = (wx1, wy1 - max(6, _s(10)))
+                                cv2.putText(vis, score_txt, rms_pos, cv2.FONT_HERSHEY_SIMPLEX,
+                                            rms_fs, (0, 0, 0), rms_thick + 3, cv2.LINE_AA)
+                                cv2.putText(vis, score_txt, rms_pos, cv2.FONT_HERSHEY_SIMPLEX,
+                                            rms_fs, (0, 255, 0), rms_thick, cv2.LINE_AA)
 
-        # BGR → RGB 변환 + 비디오 영역에 맞춰 스케일
+        # BGR → RGB 변환 (이미 표시 크기로 축소된 이미지라 변환 비용이 작음)
         rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
-        oh, ow = rgb.shape[:2]
-        scale = min(cw / ow, video_area_h / oh)
-        nw, nh = max(1, int(ow * scale)), max(1, int(oh * scale))
-        rgb = cv2.resize(rgb, (nw, nh))
         surf = pygame.image.frombuffer(rgb.tobytes(), (nw, nh), 'RGB')
 
         cx = ox + (cw - nw) // 2
@@ -1194,6 +1267,21 @@ class UIDisplay:
                 sw = int(rw * scale)
                 sh = int(rh * scale)
                 pygame.draw.rect(self._screen, (255, 100, 100), (sx, sy, sw, sh), 2)
+
+        # 2b. 다른 카메라로 드래그 중인 화구 미리보기 (드롭하면 그 카메라 소속으로 바뀜)
+        if (self._calib_op == 'move' and self._calib_selected_idx is not None
+                and self._calib_cross_target is not None):
+            new_src, vx, vy = self._calib_cross_target
+            sel = self._calib_burners[self._calib_selected_idx]
+            cell = self._cam_cells.get(new_src)
+            if cell and new_src != sel.get("source_id"):
+                _, _, rw, rh = sel["roi"]
+                scale = cell["scale"]
+                sx = int((vx - rw / 2) * scale) + cell["rect"].x
+                sy = int((vy - rh / 2) * scale) + cell["rect"].y
+                sw = int(rw * scale)
+                sh = int(rh * scale)
+                pygame.draw.rect(self._screen, (100, 220, 255), (sx, sy, sw, sh), 2)
 
         # 3. 상단 안내 바 (캔버스 영역 상단에 오버레이)
         banner = pygame.Surface((box_w, 60), pygame.SRCALPHA)
@@ -1486,32 +1574,21 @@ class UIDisplay:
 
         tc = self._card_text_color(bg_color)
 
-        # --- 2. [Cam-N] 뱃지 (우상단 정렬) ---
-        cfg = next((b for b in self.config_data.get("burners", []) if b["id"] == bid), None)
-        src_id = cfg.get("source_id", 0) if cfg else 0
-        cam_surf = self._fonts["small"].render(f"C{src_id}", True, tc)
-        bp = 4
-        badge_rect = pygame.Rect(x + w - cam_surf.get_width() - bp * 2 - 8, y + 5,
-                                 cam_surf.get_width() + bp * 2, cam_surf.get_height() + 2)
-        pygame.draw.rect(self._screen, (30, 30, 35, 100), badge_rect, border_radius=3)
-        # 카메라 뱃지 얇은 테두리
-        pygame.draw.rect(self._screen, (100, 100, 110, 100), badge_rect, 1, border_radius=3)
-        self._screen.blit(cam_surf, (badge_rect.x + bp, badge_rect.y + 1))
-
-        # --- 2b. 개발자 모드: 화구 단독 rms_threshold 사용 여부 토글 (카메라 뱃지 왼쪽 원) ---
+        # --- 2. 개발자 모드: 화구 단독 rms_threshold가 표준(global)과 다를 때만 자동 점등되는 표시등.
+        # (과거 카메라 번호 배지가 있던 우상단 자리 — 배지는 불필요해 제거하고 표시등을 그 자리로 옮김.
+        #  클릭으로 켜고 끄던 방식은 폐지, 값이 표준과 다르면 자동으로 켜진다.)
         if self.dev_mode and not self.layout_mode and self._last_processor is not None:
-            own_enabled = self._last_processor.get_rms_override_enabled(bid)
+            own_thr = self._last_processor.get_own_rms_threshold(bid)
+            global_thr = self._last_processor.get_global_rms_threshold()
+            is_custom = abs(own_thr - global_thr) > 1e-6
             r = 7
-            tcx = badge_rect.x - r - 6
-            tcy = badge_rect.y + badge_rect.height // 2
-            if own_enabled:
+            tcx = x + w - r - 10
+            tcy = y + 5 + r
+            if is_custom:
                 pygame.draw.circle(self._screen, _C_BRAND, (tcx, tcy), r)
             else:
                 pygame.draw.circle(self._screen, (70, 70, 75), (tcx, tcy), r)
                 pygame.draw.circle(self._screen, (140, 140, 150), (tcx, tcy), r, 1)
-            self._rms_toggle_rects[bid] = pygame.Rect(tcx - r - 3, tcy - r - 3, (r + 3) * 2, (r + 3) * 2)
-        else:
-            self._rms_toggle_rects.pop(bid, None)
 
         # --- 1. 화구 번호 — 카드에서 가장 크고 눈에 잘 보이는 핵심 요소.
         # 상태/타이머/게이지/버튼이 들어갈 하단 footer를 제외한 나머지 영역을
