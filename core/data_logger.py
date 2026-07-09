@@ -65,7 +65,7 @@ class DataLogger:
         for c in cam_info:
             print(f"[logger] Cam-{c['id']}: {c['width']}×{c['height']}")
 
-    def update(self, registry, sources: dict | None = None) -> None:
+    def update(self, registry, sources: dict | None = None, processor=None) -> None:
         now = time.time()
         burners = registry.all()
 
@@ -123,6 +123,14 @@ class DataLogger:
                     "vibration_score": round(bsm.vibration_score, 4),
                     "weight_detected": bsm.weight_detected,
                     "mask_px":         bsm.mask_px,
+                    "vent_count":      bsm.vent_count,
+                    "weight_class_count": bsm.weight_class_count,
+                    # 위치정보 — weight-class 후보가 2개 이상일 때 같은 물체의 중복 검출인지
+                    # (좌표가 거의 겹침) 서로 다른 물체(예: vent 오분류, 좌표가 떨어져 있음)인지
+                    # 구분하기 위함. matched_box는 그중 실제로 채택된(면적이 큰) 박스.
+                    "matched_box":     processor.last_weight_boxes.get(bsm.burner_id) if processor else None,
+                    "weight_boxes":    processor.last_weight_candidate_boxes.get(bsm.burner_id, []) if processor else [],
+                    "vent_boxes":      processor.last_vent_boxes.get(bsm.burner_id, []) if processor else [],
                 }
                 for bsm in burners
             ],

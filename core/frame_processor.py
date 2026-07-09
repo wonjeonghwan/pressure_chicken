@@ -25,7 +25,7 @@ import math
 import numpy as np
 
 from sources.video_source import VideoSource
-from core.detector import BurnerDetector, CLASS_POT_BODY, CLASS_POT_WEIGHT
+from core.detector import BurnerDetector, CLASS_POT_BODY, CLASS_POT_WEIGHT, CLASS_VENT
 from core.state_machine import BurnerRegistry, BurnerState
 from core.stabilizer import Stabilizer
 from core.optical_flow import OpticalFlowDetector
@@ -107,6 +107,10 @@ class FrameProcessor:
         self.last_weight_boxes:  dict[int, tuple[int, int, int, int]] = {}
         self.last_centroids:     dict[int, tuple[int, int]] = {}
         self.last_mask_xys:      dict[int, np.ndarray] = {}
+        # Dev 모드 오버레이 + 로그용 — 화구 window 내 vent(class=2) 검출 박스 (매칭 승패와 무관하게 전부 기록)
+        self.last_vent_boxes:    dict[int, list[tuple[int, int, int, int]]] = {}
+        # 로그 비교용 — 화구 window 내 weight(class=1) 검출 박스 전부 (dedup 이전, 중복/오분류 위치 분석용)
+        self.last_weight_candidate_boxes: dict[int, list[tuple[int, int, int, int]]] = {}
 
     def oflow(self, bid: int) -> "OpticalFlowDetector | None":
         return self._oflow.get(bid)
@@ -219,6 +223,10 @@ class FrameProcessor:
                 self.last_matched_boxes.pop(bid, None)
                 self.last_weight_boxes.pop(bid, None)
                 self.last_mask_xys.pop(bid, None)
+                self.last_vent_boxes.pop(bid, None)
+                self.last_weight_candidate_boxes.pop(bid, None)
+                bsm.vent_count = 0
+                bsm.weight_class_count = 0
                 self._body_ttl[bid] = 0
 
         frames = self._frame_cache
@@ -285,6 +293,7 @@ class FrameProcessor:
 
             bodies  = [d for d in dets if d.class_id == CLASS_POT_BODY]
             weights = [d for d in dets if d.class_id == CLASS_POT_WEIGHT]
+            vents   = [d for d in dets if d.class_id == CLASS_VENT]
 
             # ── 밥솥 매칭 (ROI 기반, 독점 그리디) ───────────────────────
             # 가장 가까운 화구가 body를 독점 — 인접 화구 간섭 방지
@@ -311,25 +320,78 @@ class FrameProcessor:
                 used_bodies.add(bi)
                 used_body_bids.add(bid)
 
-            # ── 딸랑이 독점 매칭 (x축 거리 그리디) ──────────────────────
+            # ── 딸랑이 독점 매칭 (weight+vent 통합 후보, 면적 큰 순 그리디) ──
+            # YOLO가 vent(class=2)를 weight(class=1)로, 또는 그 반대로 오분류하는
+            # 경우가 있어 weight-class만 신뢰하지 않고 vent-class도 후보 풀에 포함.
+            # 실측 라벨 면적 중앙값이 weight(0.0007) > vent(0.00034)로 대략 2배 —
+            # 후보가 여럿(애매)이거나 weight-class가 아예 없을 때도 "더 큰 쪽이
+            # 진짜 딸랑이일 가능성이 높다"는 도메인 사전지식으로 모델의 class 출력을
+            # 재검증한다 (면적 내림차순 그리디 배정이므로 애매하지 않은 단독 후보는
+            # 기존과 동일하게 그대로 선택됨).
+            weight_like = weights + vents
             matched_has_weight: dict[int, tuple[bool, tuple, np.ndarray | None]] = {}
             candidates: list[tuple[float, int, int]] = []
             for bid, body_box in matched_bodies.items():
                 bx1, by1, bx2, by2 = body_box
-                bcx = (bx1 + bx2) / 2
                 we = (bx2 - bx1) * 0.15
                 he = (by2 - by1) * 0.15
-                for wi, w in enumerate(weights):
-                    if bx1 - we <= w.cx <= bx2 + we and by1 - he <= w.cy <= by2 + he:
-                        candidates.append((abs(w.cx - bcx), bid, wi))
+                wx1, wy1, wx2, wy2 = bx1 - we, by1 - he, bx2 + we, by2 + he
+                # body 검출이 비정상적으로 크거나 어긋나면 ±15% window가 자기 캘리브레이션
+                # roi를 벗어나 옆 화구 영역까지 침범할 수 있음 (실측: 13번 화구가 11번의
+                # vent를 자기 weight로 채간 사례) — roi와 교집합으로 클리핑해 화구 간 오염 방지.
+                roi = self._burner_map[bid].get("roi")
+                if roi:
+                    rx, ry, rw, rh = roi
+                    wx1 = max(wx1, rx)
+                    wy1 = max(wy1, ry)
+                    wx2 = min(wx2, rx + rw)
+                    wy2 = min(wy2, ry + rh)
+                vent_boxes_here:   list[tuple[int, int, int, int]] = []
+                weight_boxes_here: list[tuple[int, int, int, int]] = []
+                for wi, w in enumerate(weight_like):
+                    if wx1 <= w.cx <= wx2 and wy1 <= w.cy <= wy2:
+                        area = (w.x2 - w.x1) * (w.y2 - w.y1)
+                        candidates.append((area, bid, wi))
+                        box = (int(w.x1), int(w.y1), int(w.x2), int(w.y2))
+                        if w.class_id == CLASS_VENT:
+                            vent_boxes_here.append(box)
+                        else:
+                            weight_boxes_here.append(box)
+                # Dev 모드 오버레이 + 로그용 — 매칭 승패와 무관하게 window 내 검출을 위치까지 전부 기록
+                # (weight-class 후보가 여럿일 때 같은 물체의 중복 검출인지, 서로 다른 위치의
+                #  별개 물체(예: vent 오분류)인지 좌표 비교로 구분할 수 있게 함)
+                if vent_boxes_here:
+                    self.last_vent_boxes[bid] = vent_boxes_here
+                else:
+                    self.last_vent_boxes.pop(bid, None)
+                if weight_boxes_here:
+                    self.last_weight_candidate_boxes[bid] = weight_boxes_here
+                else:
+                    self.last_weight_candidate_boxes.pop(bid, None)
+                bsm = self._registry.get(bid)
+                bsm.vent_count         = len(vent_boxes_here)
+                bsm.weight_class_count = len(weight_boxes_here)
 
-            candidates.sort(key=lambda t: t[0])
+            # 화구 하나당 후보(weight-class + vent-class 통째로)는 면적이 가장 큰 딱 하나만
+            # 채택되고 나머지는 전부 탈락한다 (used_bids로 화구당 1개, used_weights로 검출당
+            # 1개 화구에만 배정 — 2개의 weight-class 후보가 같은 화구 window에 동시에 잡혀도
+            # 아래 그리디에서 면적 큰 쪽만 살아남고 작은 쪽은 자동으로 버려짐).
+            candidates.sort(key=lambda t: t[0], reverse=True)  # 면적 큰 후보부터 배정
             used_weights: set[int] = set()
             used_bids:    set[int] = set()
             for _, bid, wi in candidates:
                 if bid in used_bids or wi in used_weights:
                     continue
-                w = weights[wi]
+                w = weight_like[wi]
+                if w.class_id == CLASS_VENT and bid in self.last_vent_boxes:
+                    # vent가 딸랑이로 승격된 경우 — 같은 박스를 vent 오버레이에도 중복 표시하지 않음
+                    promoted = (int(w.x1), int(w.y1), int(w.x2), int(w.y2))
+                    remaining = [b for b in self.last_vent_boxes[bid] if b != promoted]
+                    if remaining:
+                        self.last_vent_boxes[bid] = remaining
+                    else:
+                        self.last_vent_boxes.pop(bid, None)
+                    self._registry.get(bid).vent_count = len(remaining)
                 matched_has_weight[bid] = (
                     True,
                     (int(w.x1), int(w.y1), int(w.x2), int(w.y2)),
@@ -355,7 +417,7 @@ class FrameProcessor:
                 rx, ry, rw, rh = roi
                 weight_in_roi[bid] = any(
                     rx <= w.cx <= rx + rw and ry <= w.cy <= ry + rh
-                    for w in weights
+                    for w in weight_like
                 )
 
             # ── Phase 2: optical flow 움직임 판별 ────────────────────────
@@ -422,9 +484,13 @@ class FrameProcessor:
                         bsm = self._registry.get(bid)
                         bsm.weight_detected = False
                         bsm.vibration_score = 0.0
+                        bsm.vent_count = 0
+                        bsm.weight_class_count = 0
                         self.last_matched_boxes.pop(bid, None)
                         self.last_weight_boxes.pop(bid, None)
                         self.last_mask_xys.pop(bid, None)
+                        self.last_vent_boxes.pop(bid, None)
+                        self.last_weight_candidate_boxes.pop(bid, None)
 
         self._registry.update_all(detections)
 

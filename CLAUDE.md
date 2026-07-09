@@ -73,13 +73,20 @@ nc: 3
 names:
   0: body        # 밥솥 몸체 (기준점 역할, 세그멘테이션)
   1: pot_weight   # 딸랑이 (추)
-  2: vent         # 증기 배출구 — 학습만 시키고 실사용 안 함(weight와 혼동 방지 목적)
+  2: vent         # 증기 배출구 — weight와 혼동(오분류) 방지 겸용 판정 후보로 실사용 (아래 참조)
 ```
 
 > empty_burner 클래스는 2026-07 재학습부터 데이터셋에서 빠졌다(운영 코드에서도 원래
 > 미사용 — EMPTY 상태는 pot_body 부재로 판정하지, 별도 클래스로 판정하지 않는다).
 > `core/detector.py`의 `CLASS_POT_BODY`/`CLASS_POT_WEIGHT` 상수가 이 순서와 반드시
 > 일치해야 하며, 재학습 후 모델 교체와 상수 변경은 항상 동시에 이루어져야 한다.
+
+> **vent는 "학습만 하고 미사용"이 아니다 (2026-07 변경)**: YOLO가 vent(class=2)를
+> weight(class=1)로, 혹은 그 반대로 오분류하는 사례가 실측에서 확인되어 `core/frame_processor.py`가
+> weight-class와 vent-class 검출을 **하나의 후보 풀로 합쳐** 화구당 면적이 가장 큰 것 하나만
+> "딸랑이"로 채택한다 (실측 라벨 면적 중앙값이 weight(0.0007) > vent(0.00034)로 대략 2배 —
+> "더 큰 쪽이 진짜 딸랑이"라는 도메인 사전지식으로 모델 class 출력을 재검증). 단독 후보만 있을
+> 때는 기존과 동일하게 그대로 선택되므로 정상 케이스엔 영향 없음.
 
 현재 모델: `models/pot_seg.pt` (yolov8n-seg 기반 segmentation 모델)
 
@@ -97,6 +104,10 @@ Phase 1: Stabilizer (core/stabilizer.py)
 YOLO-seg 배치 추론 (ROI 합집합 crop 1회 호출, 동적 margin=max(30, min(50, ROI_short×0.1)))
   ↓
 body/weight 매칭 (ROI 중심거리 기반 그리디)
+  - 딸랑이 후보 = weight-class + vent-class 통합 (오분류 대비, 위 YOLO 클래스 절 참조)
+  - 화구 window를 자기 ROI로 클리핑 후 면적 내림차순 그리디 배정 (화구당 1개)
+    → body 검출이 과도하게 크거나 어긋나 옆 화구 window를 침범해 "화구 간 딸랑이 뺏김"으로
+      상태가 오락가락(와리가리)하던 현상 방지 (2026-07)
   ↓
 Phase 2: OpticalFlowDetector (core/optical_flow.py)
   - Farneback dense flow
@@ -327,5 +338,24 @@ dependencies = [
 
 ### 2. Windows 웹캠 MSMF 에러 (`Error: -1072875772`)
 
-- **현상**: `cv2.VideoCapture(0)` 사용 시 MSMF 백엔드가 프레임을 제대로 가져오지 못함
-- **조치**: `sources/video_source.py`에서 `cv2.VideoCapture(index, cv2.CAP_DSHOW)` 로 DirectShow 강제 지정
+- **현상**: `cv2.VideoCapture(0)` 사용 시 MSMF 백엔드가 프레임을 제대로 가져오지 못하거나,
+  일부 Nvidia+USB카메라 드라이버 조합에서 HW 컬러 변환(D3D11) 경로가 밝기를 과도하게
+  올리는(블리칭) 버그가 있음
+- **조치**: `sources/video_source.py`의 `_open_camera_cv()`에서 `cv2.CAP_MSMF` 백엔드를
+  `CAP_PROP_HW_ACCELERATION=VIDEO_ACCELERATION_NONE`으로 강제 지정해 HW 가속 컬러 변환을
+  끔 (2026-07). Windows 외 OS는 기본 백엔드로 open.
+
+### 3. 카메라 해상도 고정 + 폴백 (2026-07)
+
+- **문제**: 카메라 해상도를 지정하지 않으면 드라이버 기본값(장치·드라이버마다 제각각)으로
+  열려 화구 ROI 캘리브레이션이 카메라 교체/재부팅마다 어긋남. 일부 카메라는 요청 해상도
+  미지원 시 `isOpened()`는 `True`를 반환하면서 `read()`가 계속 실패하는 경우도 있어
+  `cap.get()`으로 협상 결과만 확인하는 것으로는 불충분함.
+- **조치**: `VideoSource._open_camera_with_fallback()`이 기본 `1920×1080`(소스별
+  `frame_width`/`frame_height`로 override 가능)으로 열기를 시도하고, 실제 프레임을 한 장
+  읽어보는 것까지 성공해야 채택. 실패하면 `1280×720` → `640×480` 순으로 순차 폴백.
+  실제 열린 해상도는 콘솔에 로그 출력.
+- **연동**: 프레임 해상도가 (재연결 등으로) 바뀌면 `core/stabilizer.py`의
+  `Stabilizer.stabilize()`가 이전 프레임과 `shape`가 다름을 감지해 특징점을 새로 잡고
+  해당 프레임은 보정 없이 통과시킴 (`calcOpticalFlowPyrLK`는 크기가 다른 두 프레임을
+  넣으면 죽으므로).

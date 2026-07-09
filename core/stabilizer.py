@@ -90,10 +90,14 @@ class Stabilizer:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = frame.shape[:2]
 
-        # 첫 프레임: 특징점 생성 후 기준 저장
-        if self._prev_gray is None:
+        # 첫 프레임이거나, 카메라 재연결 등으로 해상도가 바뀐 경우:
+        # 이전 프레임과 크기가 다르면 calcOpticalFlowPyrLK가 크기 불일치로 죽으므로
+        # 특징점을 새로 잡고 보정 없이 통과시킨다.
+        if self._prev_gray is None or self._prev_gray.shape != gray.shape:
             self._prev_gray = gray
             self._prev_pts  = self._detect_features(gray)
+            self._smooth_dx = 0.0
+            self._smooth_dy = 0.0
             return frame
 
         # ── Step 1: LK 광학흐름으로 격자점 추적 ──────────────────────────

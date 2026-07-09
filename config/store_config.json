@@ -367,8 +367,8 @@
       "done_first_timeout": 120,
       "pot_absent_threshold": 30,
       "roi": [
-        652,
-        87,
+        648,
+        116,
         190,
         143
       ]

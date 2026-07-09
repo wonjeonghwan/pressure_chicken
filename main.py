@@ -351,7 +351,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
                         # 파일 소스: read() 동기 — 기존 방식 유지
                         current_frames = processor.read_frames()
                         processor.detect_and_update()
-                        logger.update(registry, sources)
+                        logger.update(registry, sources, processor)
                         frame_count += 1
                         _last_detect = now
                 else:

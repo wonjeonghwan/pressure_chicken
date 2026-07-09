@@ -80,6 +80,8 @@ class BurnerStateMachine:
         self.angle_deviation: float = 0.0           # normalized RMS (EMA 전)
         self.raw_rms:         float = 0.0           # 정규화·EMA 이전 원시 RMS
         self.mask_px:         int   = 0             # 딸랑이 polygon 내부 유효 픽셀 수
+        self.vent_count:      int   = 0             # 이번 프레임 화구 window 내 vent(class=2) 검출 개수
+        self.weight_class_count: int = 0            # 이번 프레임 화구 window 내 weight(class=1) 검출 개수 (2개 이상이면 면적 큰 것만 채택되고 나머지는 탈락)
 
     # ── 외부 이벤트 ────────────────────────────────────────────────────
 

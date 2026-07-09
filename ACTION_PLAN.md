@@ -1,6 +1,54 @@
 # 압력밥솥 타이머 — 액션플랜
 
-> 최종 업데이트: 2026-06-16 (UI 통합 캔버스 재설계 + 타이머값 통일 + 정규화 정리) | 현재 단계: 매장 1차 테스트
+> 최종 업데이트: 2026-07-09 (딸랑이 오분류 "와리가리" 해결 + 카메라 해상도 고정) | 현재 단계: 매장 1차 테스트
+
+---
+
+## 2026-07-09 작업 — 딸랑이/vent 오분류로 인한 상태 와리가리 해결
+
+### A. weight/vent 통합 매칭 + ROI 클리핑 (`core/frame_processor.py`)
+- **문제**: YOLO가 vent(class=2)를 weight(class=1)로, 또는 그 반대로 오분류하는 경우가 있어
+  프레임마다 어느 쪽이 채택되는지 흔들리면 STEAMING 판정이 오락가락(와리가리)함. 실측으로
+  확인된 별도 사례로, body 검출이 비정상적으로 크거나 어긋나면 화구 window(±15%)가 자기
+  ROI를 벗어나 옆 화구 영역까지 침범 — 13번 화구가 11번 화구의 vent를 자기 weight로
+  채가는 화구 간 오염도 발견됨.
+- **조치**:
+  1. weight-class와 vent-class 검출을 하나의 후보 풀로 합쳐, 화구당 **면적이 가장 큰 것
+     하나만** 딸랑이로 채택 (실측 라벨 면적 중앙값 weight(0.0007) > vent(0.00034), 약 2배
+     — "더 큰 쪽이 진짜 딸랑이"라는 도메인 사전지식으로 모델 class 출력을 재검증). 후보가
+     단독일 때는 기존과 동일하게 그대로 선택되어 정상 케이스엔 영향 없음.
+  2. 화구 window(±15% margin)를 캘리브레이션된 자기 ROI와 교집합으로 클리핑 후 매칭 —
+     화구 간 후보 오염(위 13/11번 사례) 방지.
+  3. dev 모드 오버레이 + `data_logger.py` 로그에 vent 박스·weight 후보 박스·최종 채택
+     박스를 모두 기록해, 향후 유사 오분류를 좌표 비교로 진단 가능하게 함
+     (`BurnerStateMachine.vent_count`/`weight_class_count` 필드 추가).
+- **변경 파일**: `core/frame_processor.py`, `core/state_machine.py`, `core/data_logger.py`,
+  `ui/ui_display.py`(dev 모드 vent 박스 오버레이, 자홍색), `main.py`(logger.update에 processor 전달).
+
+### B. Stabilizer 해상도 변경 대응 (`core/stabilizer.py`)
+- **문제**: 카메라 재연결 등으로 프레임 해상도가 바뀌면 이전 프레임(`_prev_gray`)과 크기가
+  달라 `cv2.calcOpticalFlowPyrLK`가 크기 불일치로 죽음.
+- **조치**: 첫 프레임 조건에 `이전 프레임과 shape가 다른 경우`를 추가 — 특징점을 새로
+  잡고 해당 프레임은 보정 없이 통과. `_smooth_dx`/`_smooth_dy`도 함께 리셋해 해상도 전환
+  직후 스무딩 값이 이전 스케일 그대로 남는 것을 방지.
+- **연동**: 위 2026-07-08 "카메라 해상도 고정 + 폴백" 항목으로 해상도가 폴백/재협상될 때
+  이 로직이 없으면 크래시 위험이 있었음.
+
+---
+
+## 2026-07-08 작업 — 카메라 해상도 고정 + 폴백 (`sources/video_source.py`)
+
+- **문제**: 카메라 해상도를 지정하지 않으면 드라이버 기본값(장치마다 제각각)으로 열려
+  화구 ROI 캘리브레이션이 카메라 재부팅/교체마다 어긋남. 일부 카메라는 미지원 해상도
+  요청 시 `isOpened()`는 `True`를 반환하면서 `read()`가 계속 실패 — `cap.get()`으로
+  협상 결과만 확인하는 것으로는 불충분함이 확인됨.
+- **조치**: `_open_camera_with_fallback()` 신설 — 기본 `1920×1080`(소스별 `frame_width`/
+  `frame_height` config로 override 가능)으로 열기 시도 후 **실제 프레임 한 장을 읽어보는
+  것까지 성공**해야 채택. 실패 시 `1280×720` → `640×480` 순차 폴백, 실제 열린 해상도를
+  콘솔 로그로 출력.
+- **부가**: Windows MSMF 오픈 로직(`CAP_PROP_HW_ACCELERATION=NONE`, 밝기 블리칭 버그
+  방지용)과 통합해 `_open_camera_cv()`로 정리.
+- **변경 파일**: `sources/video_source.py`.
 
 ---
 
@@ -289,6 +337,9 @@ Phase 0 ✅  →  Phase 1 ✅  →  Phase 2 ✅  →  모델 재학습 ✅  → 
 | 2026-06-16 | ui/ui_display.py | **화구 카드 번호 확대** — 화구 번호를 카드에서 가장 크고 눈에 잘 보이는 요소로 변경(카드 높이에 비례하는 동적 폰트, 상단 대부분 차지, 가로 중앙). 상태/타이머는 번호 아래 보조 한 줄로 통합. 폰트 크기별 캐싱(`_dynamic_font`)으로 성능 영향 없음. |
 | 2026-06-16 | config/store_config.json | **`normalize_gamma` 0.6 → 1.0 환원** — 화구별 실제 bbox_diag 분포 데이터 없이 정해진 0.6값(거리별 보정 강도 완화)을 근거 부족으로 보류, 기존 검증된 완전 보정(1.0)으로 환원. 코드 자체는 유지 — 추후 `diag_rms.py`로 실측 후 데이터 기반 재조정 예정. |
 | 2026-06-16 | config/store_config.json, ui/ui_display.py, main.py | **타이머 값 전체 화구 통일** — 캘리브레이션으로 신규 추가된 화구(5~15번)가 구버전 기본값(countdown_second=300/done_first_timeout=600)을 가져가 1~4번(270/120)과 갈라져 있던 것을 270/120으로 통일. 캘리브레이션 신규화구 기본값·main.py config 폴백값도 동일하게 동기화. |
+| 2026-07-08 | sources/video_source.py | **카메라 해상도 고정(1920×1080) + 순차 폴백(1280×720→640×480)** — 드라이버 기본 해상도로 열려 ROI 캘리브레이션이 카메라 교체마다 어긋나던 문제. `isOpened()`만으론 불충분(일부 카메라는 미지원 해상도에도 True 반환하며 read() 실패)해 실제 프레임 read 성공까지 확인 후 채택하도록 구현. |
+| 2026-07-09 | core/frame_processor.py, core/state_machine.py, core/data_logger.py, ui/ui_display.py | **딸랑이/vent 오분류로 인한 상태 와리가리 해결** — YOLO의 weight↔vent 오분류 + body 검출 오차로 인한 화구 간 window 침범(예: 13번이 11번의 vent를 채감)이 STEAMING 판정을 불안정하게 만들던 문제. weight+vent 통합 후보 풀에서 면적 최댓값만 채택 + 화구 window를 자기 ROI로 클리핑. 진단용 vent_count/weight_class_count 필드와 dev 오버레이 추가. |
+| 2026-07-09 | core/stabilizer.py | **해상도 변경 시 크래시 방지** — 카메라 재연결 등으로 프레임 크기가 바뀌면 `calcOpticalFlowPyrLK`가 이전 프레임과 크기 불일치로 죽던 문제. 이전 프레임과 shape 다르면 첫 프레임과 동일하게 특징점 재검출 + 보정 스킵, `_smooth_dx/dy` 리셋. 2026-07-08의 해상도 폴백 로직과 연동(폴백 시 크기가 바뀌므로). |
 
 ---
 

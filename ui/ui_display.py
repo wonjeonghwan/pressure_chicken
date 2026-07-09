@@ -1149,6 +1149,16 @@ class UIDisplay:
                                 cv2.putText(vis, score_txt, rms_pos, cv2.FONT_HERSHEY_SIMPLEX,
                                             rms_fs, (0, 255, 0), rms_thick, cv2.LINE_AA)
 
+                    # Dev 모드 전용 — vent(class=2) 검출 박스 (weight와의 혼동 디버깅용, 자홍색)
+                    if self.dev_mode and bid in processor.last_vent_boxes:
+                        vent_color = (255, 0, 255)
+                        for vbox in processor.last_vent_boxes[bid]:
+                            vx1, vy1, vx2, vy2 = (_s(v) for v in vbox)
+                            cv2.rectangle(vis, (vx1, vy1), (vx2, vy2), vent_color, thin_w)
+                            cv2.putText(vis, "vent", (vx1, max(0, vy1 - max(2, _s(4)))),
+                                        cv2.FONT_HERSHEY_SIMPLEX, max(0.3, 0.4 * scale),
+                                        vent_color, max(1, _s(1)), cv2.LINE_AA)
+
         # BGR → RGB 변환 (이미 표시 크기로 축소된 이미지라 변환 비용이 작음)
         rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
         surf = pygame.image.frombuffer(rgb.tobytes(), (nw, nh), 'RGB')
