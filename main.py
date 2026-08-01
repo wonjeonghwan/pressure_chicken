@@ -117,6 +117,43 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
         if sc.get("type", "camera") == "camera":
             cam_indices[sc["id"]] = sc.get("index", 0)
 
+    # 1-b) 시작 시 자동 index 복구
+    #   재부팅/재연결 등으로 MSMF 열거 순서가 바뀌면 저장된 index가 더는 그 물리
+    #   카메라를 가리키지 않을 수 있다. 그런 소스(저장된 device_location은 PnP상
+    #   "연결됨"인데 index 열기는 실패) 만 골라, 아직 아무도 안 쓰는 index 중 실제
+    #   프레임이 나오는 것을 찾아 자동으로 재배정한다. device_location 자체가 PnP
+    #   목록에 없는(진짜 미연결) 소스는 건드리지 않음 — C키(카메라 전환)로 수동 확인 필요.
+    _recoverable = [
+        sc for sc in sources_cfg
+        if sc.get("type", "camera") == "camera" and sources[sc["id"]].failed
+        and sc.get("device_location") and sc["device_location"] in _pnp_locations
+    ]
+    if _recoverable:
+        if len(_recoverable) > 1:
+            print(f"[main] 경고: index 어긋난 카메라 {len(_recoverable)}대 동시 발견 — "
+                  f"자동 매칭 순서가 실제와 다를 수 있음 (필요시 C키로 육안 확인 후 재전환)")
+        _used_indices = {sc.get("index") for sc in sources_cfg
+                          if sc.get("type", "camera") == "camera" and not sources[sc["id"]].failed}
+        _recovered_any = False
+        for sc in _recoverable:
+            found = find_unused_index(_used_indices)
+            if found is None:
+                print(f"[main] 소스 {sc['id']}: 대체 index를 찾지 못함 — C키로 수동 전환 필요")
+                continue
+            new_index, vs = found
+            _used_indices.add(new_index)
+            old_index = sc.get("index")
+            sources[sc["id"]].release()
+            sources[sc["id"]] = vs
+            cam_indices[sc["id"]] = new_index
+            sc["index"] = new_index
+            vs.start_capture(fps=target_fps)
+            _recovered_any = True
+            print(f"[main] 소스 {sc['id']}: index {old_index} → {new_index} 자동 복구 "
+                  f"(포트 {sc['device_location']})")
+        if _recovered_any:
+            save_config(config.get("_path"), config)
+
     # 2) Registry
     registry = BurnerRegistry()
     burner_meta = {}
@@ -125,7 +162,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
             b["id"],
             b.get("countdown_first", 720),
             b.get("countdown_second", 270),
-            b.get("done_first_timeout", 120),
+            b.get("done_first_timeout", 150),
             b.get("pot_absent_threshold", 30),
         )
         burner_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
@@ -140,17 +177,17 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
     logger = DataLogger(log_dir=config.get("log_dir", "logs"))
 
     # 6-a) FrameSaver — 학습 데이터용 주기 스냅샷 (메인 루프 영향 없음)
-    # 2026-07-04: 이미지 저장 불필요 → 비활성화
-    # saver_cfg = config.get("frame_saver", {})
+    # 2026-07-26: 하루 2회 스냅샷 수집 재활성화 (interval_sec=43200 = 12시간)
+    saver_cfg = config.get("frame_saver", {})
     frame_saver: FrameSaver | None = None
-    # if saver_cfg.get("enabled", True):
-    #     frame_saver = FrameSaver(
-    #         sources=sources,
-    #         log_dir=config.get("log_dir", "logs"),
-    #         interval_sec=int(saver_cfg.get("interval_sec", 7200)),
-    #         jpeg_quality=int(saver_cfg.get("jpeg_quality", 92)),
-    #     )
-    #     frame_saver.start()
+    if saver_cfg.get("enabled", True):
+        frame_saver = FrameSaver(
+            sources=sources,
+            log_dir=config.get("log_dir", "logs"),
+            interval_sec=int(saver_cfg.get("interval_sec", 43200)),
+            jpeg_quality=int(saver_cfg.get("jpeg_quality", 92)),
+        )
+        frame_saver.start()
 
     def print_load_diagnostics(proc: FrameProcessor) -> None:
         """카메라별 ROI 합집합 면적 + 화구 수를 콘솔에 출력 — 매장 셋업 진단용."""
@@ -237,7 +274,7 @@ def run(config: dict, test_frames: int = 0, screenshot_path: str | None = None) 
         new_registry = BurnerRegistry()
         new_meta = {}
         for b in burners_cfg:
-            new_registry.add(b["id"], b.get("countdown_first", 720), b.get("countdown_second", 270), b.get("done_first_timeout", 120), b.get("pot_absent_threshold", 30))
+            new_registry.add(b["id"], b.get("countdown_first", 720), b.get("countdown_second", 270), b.get("done_first_timeout", 150), b.get("pot_absent_threshold", 30))
             new_meta[b["id"]] = {"grid_pos": b.get("grid_pos", [0, b["id"] - 1])}
             
         display._registry = new_registry

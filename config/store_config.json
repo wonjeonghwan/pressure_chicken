@@ -3,10 +3,11 @@
   "store_name": "압구정점",
   "sources": [
     {
-      "id": 10,
+      "id": 14,
       "type": "camera",
       "index": 0,
-      "label": "Cam-10",
+      "label": "Cam-14",
+      "device_location": "0000.0014.0000.001.001.000.000.000.000",
       "layout_pos": [
         4,
         0
@@ -17,26 +18,11 @@
       ]
     },
     {
-      "id": 12,
+      "id": 16,
       "type": "camera",
-      "index": 2,
-      "label": "Cam-12",
-      "device_location": "0000.0014.0000.002.001.000.000.000.000",
-      "layout_pos": [
-        9,
-        5
-      ],
-      "layout_size": [
-        5,
-        5
-      ]
-    },
-    {
-      "id": 13,
-      "type": "camera",
-      "index": 3,
-      "label": "Cam-13",
-      "device_location": "0003.0000.0000.007.001.000.000.000.000",
+      "index": 1,
+      "label": "Cam-16",
+      "device_location": "0003.0000.0000.007.000.000.000.000.000",
       "layout_pos": [
         9,
         0
@@ -47,11 +33,26 @@
       ]
     },
     {
-      "id": 14,
+      "id": 17,
       "type": "camera",
-      "index": 1,
-      "label": "Cam-14",
-      "device_location": "0000.0014.0000.001.001.000.000.000.000",
+      "index": 2,
+      "label": "Cam-17",
+      "device_location": "0000.0014.0000.001.002.000.000.000.000",
+      "layout_pos": [
+        9,
+        5
+      ],
+      "layout_size": [
+        5,
+        5
+      ]
+    },
+    {
+      "id": 18,
+      "type": "camera",
+      "index": 3,
+      "label": "Cam-18",
+      "device_location": "0000.0014.0000.002.004.000.000.000.000",
       "layout_pos": [
         4,
         5
@@ -115,290 +116,327 @@
   },
   "burners": [
     {
-      "id": 1,
-      "source_id": 10,
+      "id": 6,
+      "source_id": 18,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        453,
-        410,
-        440,
-        435
-      ],
-      "grid_pos": [
-        2,
-        0
-      ],
-      "rms_override_enabled": true,
-      "optical_flow": {
-        "rms_threshold": 0.15
-      }
-    },
-    {
-      "id": 2,
-      "source_id": 10,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        699,
-        69,
-        362,
-        359
+        912,
+        162,
+        264,
+        150
       ],
       "grid_pos": [
         0,
-        1
-      ],
-      "optical_flow": {
-        "rms_threshold": 0.15
-      },
-      "rms_override_enabled": true
-    },
-    {
-      "id": 3,
-      "source_id": 10,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        940,
-        432,
-        315,
-        336
-      ],
-      "grid_pos": [
-        2,
-        2
-      ],
-      "optical_flow": {
-        "rms_threshold": 0.18
-      }
-    },
-    {
-      "id": 4,
-      "source_id": 10,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1083,
-        124,
-        289,
-        289
-      ],
-      "grid_pos": [
-        0,
-        3
+        5
       ]
     },
     {
-      "id": 5,
-      "source_id": 10,
+      "id": 7,
+      "source_id": 18,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        1274,
-        413,
-        212,
-        282
+        701,
+        258,
+        263,
+        187
       ],
       "grid_pos": [
         2,
-        4
+        6
+      ]
+    },
+    {
+      "id": 8,
+      "source_id": 18,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        963,
+        377,
+        264,
+        183
       ],
-      "rms_override_enabled": true,
+      "grid_pos": [
+        0,
+        7
+      ]
+    },
+    {
+      "id": 9,
+      "source_id": 18,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        719,
+        527,
+        267,
+        234
+      ],
+      "grid_pos": [
+        2,
+        8
+      ]
+    },
+    {
+      "id": 10,
+      "source_id": 18,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1021,
+        699,
+        323,
+        264
+      ],
+      "grid_pos": [
+        0,
+        9
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.15
+      }
+    },
+    {
+      "id": 11,
+      "source_id": 16,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        567,
+        473,
+        293,
+        202
+      ],
+      "grid_pos": [
+        3,
+        12
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.14
+      }
+    },
+    {
+      "id": 15,
+      "source_id": 16,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        878,
+        33,
+        190,
+        140
+      ],
+      "grid_pos": [
+        7,
+        12
+      ]
+    },
+    {
+      "id": 14,
+      "source_id": 16,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1021,
+        163,
+        205,
+        151
+      ],
+      "grid_pos": [
+        6,
+        10
+      ]
+    },
+    {
+      "id": 13,
+      "source_id": 16,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        737,
+        201,
+        223,
+        176
+      ],
+      "grid_pos": [
+        5,
+        12
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.17
+      }
+    },
+    {
+      "id": 12,
+      "source_id": 16,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        905,
+        410,
+        282,
+        205
+      ],
+      "grid_pos": [
+        4,
+        10
+      ],
       "optical_flow": {
         "rms_threshold": 0.16
       }
     },
     {
-      "id": 6,
+      "id": 1,
       "source_id": 14,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        959,
-        175,
-        219,
-        154
+        516,
+        410,
+        326,
+        475
       ]
     },
     {
-      "id": 7,
+      "id": 2,
       "source_id": 14,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        706,
-        271,
-        253,
-        194
-      ]
-    },
-    {
-      "id": 8,
-      "source_id": 14,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        977,
-        388,
-        271,
-        197
-      ]
-    },
-    {
-      "id": 10,
-      "source_id": 14,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1032,
-        713,
-        329,
-        209
-      ]
-    },
-    {
-      "id": 9,
-      "source_id": 14,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        693,
-        530,
-        291,
-        250
-      ]
-    },
-    {
-      "id": 11,
-      "source_id": 13,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        760,
-        479,
+        802,
+        51,
         267,
-        187
-      ]
+        363
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.17
+      }
     },
     {
-      "id": 12,
-      "source_id": 13,
+      "id": 3,
+      "source_id": 14,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1138,
-        366,
-        231,
-        212
-      ]
-    },
-    {
-      "id": 13,
-      "source_id": 13,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        896,
-        208,
-        216,
-        150
-      ]
-    },
-    {
-      "id": 14,
-      "source_id": 13,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        1230,
-        146,
-        205,
-        146
-      ]
-    },
-    {
-      "id": 15,
-      "source_id": 13,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
         1047,
-        17,
-        194,
-        133
+        438,
+        234,
+        253
+      ]
+    },
+    {
+      "id": 4,
+      "source_id": 14,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1204,
+        139,
+        168,
+        282
+      ]
+    },
+    {
+      "id": 5,
+      "source_id": 14,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        1347,
+        399,
+        161,
+        253
       ]
     },
     {
       "id": 16,
-      "source_id": 12,
+      "source_id": 17,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        648,
-        116,
-        190,
-        143
+        735,
+        113,
+        187,
+        161
       ]
     },
     {
       "id": 17,
-      "source_id": 12,
+      "source_id": 17,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        809,
-        231,
-        205,
-        221
+        867,
+        285,
+        275,
+        194
       ]
     },
     {
       "id": 18,
-      "source_id": 12,
+      "source_id": 17,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        479,
-        285,
-        249,
-        161
+        567,
+        303,
+        256,
+        246
+      ],
+      "optical_flow": {
+        "rms_threshold": 0.17
+      }
+    },
+    {
+      "id": 19,
+      "source_id": 17,
+      "countdown_first": 720,
+      "countdown_second": 270,
+      "done_first_timeout": 150,
+      "pot_absent_threshold": 30,
+      "roi": [
+        732,
+        538,
+        311,
+        220
       ],
       "optical_flow": {
         "rms_threshold": 0.16
@@ -406,37 +444,22 @@
     },
     {
       "id": 20,
-      "source_id": 12,
+      "source_id": 17,
       "countdown_first": 720,
       "countdown_second": 270,
-      "done_first_timeout": 120,
+      "done_first_timeout": 150,
       "pot_absent_threshold": 30,
       "roi": [
-        281,
-        571,
-        264,
-        230
+        369,
+        615,
+        286,
+        285
       ],
       "optical_flow": {
-        "rms_threshold": 0.16
+        "rms_threshold": 0.17
       }
-    },
-    {
-      "id": 19,
-      "source_id": 12,
-      "countdown_first": 720,
-      "countdown_second": 270,
-      "done_first_timeout": 120,
-      "pot_absent_threshold": 30,
-      "roi": [
-        629,
-        519,
-        286,
-        260
-      ]
     }
   ],
-  "_path": "config/store_config.json",
   "card_positions": {
     "1": [
       2,
@@ -518,5 +541,6 @@
       12,
       10
     ]
-  }
+  },
+  "_path": "config/store_config.json"
 }

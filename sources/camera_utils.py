@@ -72,17 +72,18 @@ def switch_camera(
     C 키로 카메라를 다음 사용 가능한 index로 전환.
     성공 시 새 index 반환; 실패 시 current_index 유지.
 
+    다른 source가 이미 쓰는 index라도 건너뛰지 않고 그대로 열어서 보여준다 —
+    카메라 재연결로 MSMF index가 재배열되면 config가 기억하는 "누가 어느 index를
+    쓰는지"가 실제와 어긋날 수 있어서, 그 판단을 사람이 화면으로 직접 확인하게
+    한다 (같은 물리 카메라를 두 source가 잠깐 동시에 띄우는 상태가 될 수 있음 —
+    확인 후 반대편 source도 필요하면 수동으로 다시 전환).
+
     참고: 이 함수는 수동 '카메라 전환(C)' 버튼 전용.
           자동 카메라 추가는 main.py add_camera() 참조.
     """
-    used = {sc.get("index") for sc in (config or {}).get("sources", [])
-            if sc.get("type", "camera") == "camera" and sc.get("id") != source_id}
-
     print(f"[camera_utils] 카메라 전환 시도 (현재 index={current_index})")
     for i in range(1, max_try + 1):
         next_index = (current_index + i) % max_try
-        if next_index in used:
-            continue
         if not _probe_index(next_index):
             continue
         vs = open_camera(next_index)

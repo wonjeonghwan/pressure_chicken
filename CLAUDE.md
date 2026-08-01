@@ -317,7 +317,7 @@ dependencies = [
   },
   "burners": [
     {"id": 1, "source_id": 0, "countdown_first": 720, "countdown_second": 270,
-     "done_first_timeout": 120, "pot_absent_threshold": 30, "grid_pos": [0, 0]}
+     "done_first_timeout": 150, "pot_absent_threshold": 30, "grid_pos": [0, 0]}
   ]
 }
 ```

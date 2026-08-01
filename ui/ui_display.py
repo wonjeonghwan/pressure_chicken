@@ -851,7 +851,7 @@ class UIDisplay:
                             "source_id": self._calib_active_source,
                             "countdown_first": 720,
                             "countdown_second": 270,
-                            "done_first_timeout": 120,
+                            "done_first_timeout": 150,
                             "pot_absent_threshold": 30,
                             "roi": roi
                         })
@@ -1000,6 +1000,9 @@ class UIDisplay:
 
             frame = frames.get(src_id)
             self._draw_camera_cell(sc, frame, processor, ox, oy, cw, ch)
+            # 오프라인이라 _cam_cells에 못 등록됐을 경우를 위한 클릭용 폴백 rect
+            # (frame이 None이면 _draw_camera_cell이 좌표 매핑을 등록하지 않고 반환함)
+            self._cam_cells.setdefault(src_id, {"rect": cell_bg, "scale": 1.0, "frame_size": (cw, ch)})
 
             is_lost = False
             if src_id in self._cam_offline_since:
